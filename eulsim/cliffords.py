@@ -1,9 +1,15 @@
-"""Single-qubit Clifford toolkit.
+"""Single-qubit Clifford toolkit: 2x2 complex matrices as 8-float lists
+[re00,im00,re01,im01,re10,im10,re11,im11].
 
-2x2 complex matrices stored as 8-float lists
-[re00,im00,re01,im01,re10,im10,re11,im11]: named gate constants,
-multiplication, dagger, Pauli conjugation, phase-canonical keys and
-short names for the 24 single-qubit Cliffords (frame matrices / VOPs).
+Named gate constants, multiplication, dagger, Pauli conjugation and a
+phase-canonical key (Cliffords are defined up to phase).
+
+This is the *reference definition* of the group, not the compute path.  The
+simulator stores frames as Eulerian codes (see ``frames``), whose rule tables
+are derived from the functions here at import time and checked against them
+over all 24 elements.  Matrices survive in three places: that derivation, the
+dense state-vector display, and the ``graphsim`` baseline, which stores frames
+this way on purpose.
 """
 from __future__ import annotations
 
@@ -27,16 +33,6 @@ def _mat2x2_mul(A: list[float], B: list[float]) -> list[float]:
     r10=a10*b00+a11*b10; r11=a10*b01+a11*b11
     return [round(r00.real,9),round(r00.imag,9),round(r01.real,9),round(r01.imag,9),
             round(r10.real,9),round(r10.imag,9),round(r11.real,9),round(r11.imag,9)]
-
-
-def _parse_mats(n: int, local_unitaries: list | None) -> list[list[float]]:
-    if local_unitaries is None:
-        return [_IDENTITY_U8] * n
-    out = []
-    for qi in range(n):
-        raw = local_unitaries[qi] if qi < len(local_unitaries) else _IDENTITY_U8
-        out.append([float(x) for x in (raw if len(raw) >= 8 else _IDENTITY_U8)])
-    return out
 
 
 def _conj_pauli(mat8: list[float], p: str) -> tuple[int, str]:
@@ -66,9 +62,8 @@ def _dag_u8(m: list[float]) -> list[float]:
     return [m[0], -m[1], m[4], -m[5], m[2], -m[3], m[6], -m[7]]
 
 
-# ── Naming single-qubit Cliffords (for the canonicalisation report) ────────────
-_X_U8 = [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0]
-_Y_U8 = [0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0]
+_X_U8 = [0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0]   # Pauli X
+_Y_U8 = [0.0, 0.0, 0.0, -1.0, 0.0, 1.0, 0.0, 0.0]  # Pauli Y
 
 
 def _clifford_key(m: list[float]) -> tuple:
@@ -81,35 +76,3 @@ def _clifford_key(m: list[float]) -> tuple:
             break
     z = [c / ph for c in z]
     return tuple(round(c.real, 3) for c in z) + tuple(round(c.imag, 3) for c in z)
-
-
-def _build_clifford_names() -> dict:
-    """Map each single-qubit Clifford (phase-canonical key) to a short label.
-    Named gates take priority; the rest get a shortest word in {H, S, S†}."""
-    from collections import deque
-    seeded = [("I", _IDENTITY_U8), ("X", _X_U8), ("Y", _Y_U8), ("Z", _Z_U8),
-              ("H", _H_U8), ("S", _S_U8), ("S†", _SDG_U8)]
-    names: dict = {}
-    for nm, m in seeded:
-        names.setdefault(_clifford_key(m), nm)
-    gens = [("H", _H_U8), ("S", _S_U8), ("S†", _SDG_U8)]
-    q = deque([(_IDENTITY_U8, "")])
-    words = {_clifford_key(_IDENTITY_U8): ""}
-    while q:
-        m, w = q.popleft()
-        for nm, gm in gens:
-            m2 = _mat2x2_mul(gm, m)
-            k = _clifford_key(m2)
-            if k not in words:
-                words[k] = nm + w           # operator order: leftmost applied last
-                q.append((m2, nm + w))
-    for k, w in words.items():
-        names.setdefault(k, w or "I")
-    return names
-
-
-_CLIFFORD_NAMES = _build_clifford_names()
-
-
-def _name_clifford(m: list[float]) -> str:
-    return _CLIFFORD_NAMES.get(_clifford_key(m), "?")

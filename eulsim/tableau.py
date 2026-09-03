@@ -3,25 +3,23 @@
 Stabilizer generators of (tensor L_i)|G>, Pauli-string multiplication,
 and Gauss-Jordan reduction of a tableau back to graph standard form
 K_v = X_v (tensor) Z_N(v). Also the stabilizer report for the UI.
+
+Frames are Eulerian codes (see ``frames``): conjugating a Pauli through L_v
+is one table read, and the local Cliffords the reduction accumulates compose
+by ``frames.LGATE``.
 """
 from __future__ import annotations
 
-from .cliffords import (
-    _H_U8,
-    _IDENTITY_U8,
-    _SDG_U8,
-    _Z_U8,
-    _conj_pauli,
-    _dag_u8,
-    _mat2x2_mul,
-    _parse_mats,
-)
+from .frames import DAG, ID_PAIR, LGATE, conj, parse_frame
+
+_PC = {"X": "#1a8078", "Y": "#b85535", "Z": "#5a1f6e", "I": "#888888"}
+
 
 def compute_stabilizers(
-    adj: list[set[int]], n: int, labels: list[str],
-    local_unitaries: list | None = None,
+    adj: list[set[int]], n: int, labels: list[str], frame: list | None = None,
 ) -> list[dict]:
-    mats = _parse_mats(n, local_unitaries)
+    """The n generators K_i = L(X_i ⊗ Z_N(i))L† with an HTML rendering."""
+    f = parse_frame(n, frame)
     result = []
     for i in range(n):
         nb = sorted(adj[i])
@@ -29,18 +27,15 @@ def compute_stabilizers(
         # K_i = X_i (x) Z_N(i): only the support is conjugated, the rest is I.
         paulis: list[str] = ["I"] * n
         for k, base in [(i, "X")] + [(j, "Z") for j in nb]:
-            s, p = _conj_pauli(mats[k], base)
+            s, p = conj(f[k], base)
             overall_sign *= s
             paulis[k] = p
-        _PC = {"X": "#1a8078", "Y": "#b85535", "Z": "#5a1f6e", "I": "#888888"}
-        def _p_html(p: str, lbl: str) -> str:
-            c = _PC.get(p, "#333")
-            return f'<span style="color:{c};font-weight:700">{p}<sub>{lbl}</sub></span>'
         sign_html = "&minus;" if overall_sign < 0 else ""
         non_id = [(k, paulis[k]) for k in range(n) if paulis[k] != "I"]
         if non_id:
             compact = sign_html + " &otimes; ".join(
-                _p_html(p, labels[k]) for k, p in non_id)
+                f'<span style="color:{_PC[p]};font-weight:700">'
+                f'{p}<sub>{labels[k]}</sub></span>' for k, p in non_id)
         else:
             compact = sign_html + "I"
         pauli_str = ("-" if overall_sign < 0 else "") + "".join(paulis)
@@ -76,7 +71,7 @@ def _stab_mul(g1: tuple, g2: tuple, n: int) -> tuple:
     return (1 if k == 0 else -1, out)
 
 
-def _tableau_from_state(adj: list[set[int]], n: int, mats: list) -> list[list]:
+def _tableau_from_state(adj: list[set[int]], n: int, f: list[int]) -> list[list]:
     """Stabilizer generators of |ψ⟩ = (⊗L_i)|G⟩ as a tableau.
     Each entry is [sign(±1), letters] where letters[k] ∈ {I,X,Y,Z}.
     The tableau itself is dense by nature (n rows of n letters); it is filled
@@ -87,7 +82,7 @@ def _tableau_from_state(adj: list[set[int]], n: int, mats: list) -> list[list]:
         sign = 1
         letters = ["I"] * n
         for k, base in [(v, "X")] + [(j, "Z") for j in sorted(adj[v])]:
-            s, p = _conj_pauli(mats[k], base)
+            s, p = conj(f[k], base)
             sign *= s
             letters[k] = p
         tab.append([sign, letters])
@@ -95,12 +90,12 @@ def _tableau_from_state(adj: list[set[int]], n: int, mats: list) -> list[list]:
 
 
 def _reduce_tableau(tab: list[list], n: int
-                    ) -> tuple[list[set[int]], list[list[float]], list[list[float]]]:
+                    ) -> tuple[list[set[int]], list[int], list[int]]:
     """Reduce a stabilizer tableau to graph standard form K'_v = X_v ⊗ Z_{N'(v)}
     (+1 signs) by Gauss-Jordan, applying local Cliffords C_i (H, S†, Z).
-    Returns (new_adj as adjacency sets, new_local_unitaries = C_i†,
-    corrections = C_i)."""
-    C = [list(_IDENTITY_U8) for _ in range(n)]   # accumulated Clifford per qubit
+    Returns (new_adj as adjacency sets, new_frame = C_i†, corrections = C_i)."""
+    C = [ID_PAIR] * n                            # accumulated Clifford per qubit
+    _H, _SDG, _Z = LGATE["H"], LGATE["SDG"], LGATE["Z"]
 
     def conj_H(j: int) -> None:                  # X↔Z, Y→-Y
         for g in tab:
@@ -108,20 +103,20 @@ def _reduce_tableau(tab: list[list], n: int
             if l == "X": g[1][j] = "Z"
             elif l == "Z": g[1][j] = "X"
             elif l == "Y": g[0] = -g[0]
-        C[j] = _mat2x2_mul(_H_U8, C[j])
+        C[j] = _H[C[j]]
 
     def conj_Sdg(j: int) -> None:                # X→-Y, Y→X, Z→Z
         for g in tab:
             l = g[1][j]
             if l == "X": g[1][j] = "Y"; g[0] = -g[0]
             elif l == "Y": g[1][j] = "X"
-        C[j] = _mat2x2_mul(_SDG_U8, C[j])
+        C[j] = _SDG[C[j]]
 
     def conj_Z(j: int) -> None:                  # flip sign where X-component present
         for g in tab:
             if g[1][j] in ("X", "Y"):
                 g[0] = -g[0]
-        C[j] = _mat2x2_mul(_Z_U8, C[j])
+        C[j] = _Z[C[j]]
 
     has_x = lambda l: l in ("X", "Y")            # X-component present?
 
@@ -154,6 +149,4 @@ def _reduce_tableau(tab: list[list], n: int
                 new_adj[j].add(k)
                 new_adj[k].add(j)
 
-    new_lu = [_dag_u8(C[i]) for i in range(n)]
-    return new_adj, new_lu, [list(C[i]) for i in range(n)]
-
+    return new_adj, [DAG[c] for c in C], list(C)

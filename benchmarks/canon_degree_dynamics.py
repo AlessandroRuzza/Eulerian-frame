@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Running degree of a graph while it is being canonicalized.
 
-Three experiments (notes/canonicalization-degree-dynamics.md):
+Three experiments (tests/canonicalization_study/canonicalization-degree-dynamics.md):
   --traj       degree trajectory through the three phases of sec:canon-algorithm
   --attractor  end degree from several starting densities (two-sided fixed point)
   --threshold  end degree against starting degree, several n
 
-Run from the repository root:
-    .env/bin/python3 graph_states/benchmarks/canon_degree_dynamics.py --traj
+Run from anywhere:
+    .env/bin/python3 benchmarks/canon_degree_dynamics.py --traj
 """
 import sys, argparse
 from pathlib import Path
@@ -15,11 +15,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bench_frames as B
 import eulsim.framecanon as FC
-
-
-def cp(c):
-    """bench int code 6*w^C + w^N -> ((sign, letter), (sign, letter))"""
-    return tuple((1 if p < 3 else -1, "XYZ"[p % 3]) for p in (c // 6, c % 6))
 
 
 def _run(st, n, on_reframe=None):
@@ -42,7 +37,7 @@ def _run(st, n, on_reframe=None):
 def state(n, deg0, seed):
     rng = B.Random((n, deg0, seed).__hash__())
     adj, codes = B.random_state(rng, n, deg0)
-    return FC.FramedState(adj, [cp(c) for c in codes])
+    return FC.FramedState(adj, codes)
 
 
 def mean_deg(adj):

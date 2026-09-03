@@ -7,6 +7,15 @@ L_v Z L_v†)`, so the frame is read directly as a pair of signed Pauli letters
 instead of an arbitrary index. The state is a graph plus that
 frame, and every operation is a local rewrite of a closed neighbourhood.
 
+Concretely each frame is **one integer** `6·w^C + w^N` in `0..35` (24 valid):
+a signed Pauli packs into `0..5` as `axis + 3·sign_bit`. Every frame update is
+then a single table read and every case split an integer test — is `w^N` on the
+Z axis (`code % 6 in {2,5}`), is `L` in the Z-set `{I,Z,S,S†}` (`code % 6 == 2`),
+is this vertex in the Hadamard support (`code % 6 == 0`). No matrices, no
+phase canonicalisation. See `eulsim/frames.py`, whose rule tables are derived
+from the 2x2 matrix toolkit at import and machine-checked against it over all
+24 Cliffords.
+
 It ships as an interactive web app: two side-by-side graph editors, live
 stabilizers, state vector, canonicalization, and LC-equivalence checking.
 
@@ -82,8 +91,12 @@ so each request carries the whole graph and gets the whole updated state back.
 A graph on the wire is `{"n": ..., "edges": [[i, j], ...]}`, optionally with
 `"labels"` and `"local_unitaries"` — one 8-float list `[re00, im00, re01,
 im01, re10, im10, re11, im11]` per qubit, defaulting to the identity.
-Responses return `new_edges` in the same shape. A dense `"adj"` 0/1 matrix is
-still accepted on input for older clients.
+Responses return `new_edges` in the same shape. The 8-float form is what the
+page's own Clifford arithmetic speaks; `server.py` converts to and from frame
+codes at the boundary and nothing below it sees a matrix.
+
+`/api/reframe` is a JSON-API surface only: the page computes `R_v` client-side
+and never calls it.
 
 Limits: 64 qubits per request, 10 qubits for the state-vector display, and the
 LC-orbit BFS stops at 20 vertices or 60000 visited states (both overridable
@@ -102,7 +115,8 @@ display panel.
 ```
 run_eulsim.py         thin launcher (equivalent to python3 -m eulsim)
 eulsim/
-  cliffords.py        2x2 Clifford matrix toolkit (8-float representation)
+  frames.py           the Eulerian frame encoding: codes, rule tables, conversions
+  cliffords.py        2x2 Clifford matrix toolkit — reference definition of the group
   graph_ops.py        local complementation, re-framing move, measurements
   tableau.py          stabilizer tableau: generators, reduction, UI report
   framecanon.py       canonical frame by re-framing only (R_v, pivots)
@@ -111,10 +125,14 @@ eulsim/
   statevector.py      dense state-vector expansion (display)
   properties.py       graph-theoretic properties/tags
   lc_orbit.py         LC-orbit BFS: equivalence, representative, orbit size
+  sim.py              in-place stateful simulator (operation streams)
   server.py           HTTP handler + JSON API endpoints
   page.py             HTML page assembly
   web/index.html      frontend (HTML/CSS/JS)
   cli.py              argument parsing + server startup
+  graphsim/           VOP-storage backends (the comparison baseline)
+    tables.py         the same rules over Clifford keys and opaque ids
+    sim.py            CliffordSim / CliffordLUTSim / CliffordIDSim
 tests/                correctness checks
 benchmarks/           scaling measurements
 ```
@@ -122,13 +140,30 @@ benchmarks/           scaling measurements
 `eulsim/__init__.py` re-exports the compute layer, so the package is usable as
 a library without ever starting the server.
 
+### The two representations
+
+`eulsim` stores a frame as an Eulerian code; `eulsim.graphsim` keeps the
+Anders-Briegel picture instead, where a frame is a *vertex operator* held as an
+actual single-qubit Clifford — as a 2x2 matrix (`CliffordSim`), as a
+phase-canonical key (`CliffordLUTSim`), or under an opaque id 0..23
+(`CliffordIDSim`). The graph layer, the coupled CZ block table and the tableau
+fallback are imported from the core rather than copied, so what differs between
+the backends is exactly the frame representation. `bench_frames.py --selftest`
+runs all four against the functional core op by op.
+
+`cliffords.py` stays in the core because it is where the group is *defined*:
+`frames.py` derives its integer rules from it and verifies them against it, the
+state-vector display needs real amplitudes, and `graphsim` is built on matrices
+by construction. Nothing on the compute path multiplies one.
+
 ## Tests and benchmarks
 
 From the repository root:
 
 ```
-./py_compile_test.sh                             # syntax
-.env/bin/python3 tests/test_canonical_frame.py   # canonical frame
+./py_compile_test.sh                              # syntax
+.env/bin/python3 tests/test_canonical_frame.py    # canonical frame
+.env/bin/python3 benchmarks/bench_frames.py --selftest   # all backends agree
 ```
 
 The canonical-frame test draws random framed states and checks that the output
@@ -142,8 +177,14 @@ Benchmarks live in `benchmarks/` and are run the same way:
 
 | script | measures |
 | --- | --- |
-| `bench_frames.py` | per-operation cost, Eulerian frame vs an opaque-index baseline |
+| `bench_frames.py` | per-operation cost across the four frame representations |
 | `canon_scaling.py` | canonicalization against `n` at fixed average degree |
 | `canon_degree_dynamics.py` | how the running degree moves during canonicalization |
 | `canon_rgs.py` | canonicalization of repeater-graph-state chains |
->>>>>>> f9fb2b2 (Eulerian Frame simulator)
+| `pivot_canonical.py` | incremental re-canonicalization after each operation |
+| `plots_ch5.py` | renders the chapter-5 figures from the measured numbers |
+
+`bench_frames.py --selftest` is the cross-check that keeps the backends honest:
+it runs `clifford`, `cliffordlut`, `cliffordid`, `euler` and the functional
+`eulsim` API over the same random operation stream and asserts the graph and
+the frame agree after every single op.

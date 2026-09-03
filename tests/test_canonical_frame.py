@@ -22,8 +22,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from eulsim.canonical import canonicalize, canonicalize_rref
-from eulsim.cliffords import _clifford_key, _conj_pauli
-from eulsim.framecanon import _U8
+from eulsim.frames import VALID_PAIRS, conj
 from eulsim.statevector import compute_state_vector
 from eulsim.tableau import _tableau_from_state
 
@@ -52,8 +51,8 @@ def _valid_support(tab, n, S: set) -> bool:
     return rank == n
 
 
-def _shortlex_least_support(adj, n, mats) -> tuple:
-    tab = _tableau_from_state(adj, n, mats)
+def _shortlex_least_support(adj, n, frame) -> tuple:
+    tab = _tableau_from_state(adj, n, frame)
     for size in range(n + 1):
         for S in itertools.combinations(range(n), size):
             if _valid_support(tab, n, set(S)):
@@ -79,7 +78,6 @@ def _same_state(a, b) -> bool:
 
 def main(trials: int = 300, n_max: int = 6, seed: int = 20260826) -> int:
     rng = random.Random(seed)
-    cliffords = [_U8[k] for k in sorted(_U8)]
     fails = {k: 0 for k in ("state", "restricted", "shortlex", "vs_rref")}
 
     for _ in range(trials):
@@ -89,24 +87,20 @@ def main(trials: int = 300, n_max: int = 6, seed: int = 20260826) -> int:
             for j in range(i + 1, n):
                 if rng.random() < rng.choice([0.2, 0.5, 0.8]):
                     adj[i].add(j); adj[j].add(i)
-        lu = [cliffords[rng.randrange(24)] for _ in range(n)]
+        frame = [rng.choice(VALID_PAIRS) for _ in range(n)]
 
-        new_adj, new_lu, _corr, info = canonicalize(adj, n, lu)
+        new_adj, new_frame, _corr, info = canonicalize(adj, n, frame)
 
-        if not _same_state(compute_state_vector(adj, n, lu),
-                           compute_state_vector(new_adj, n, new_lu)):
+        if not _same_state(compute_state_vector(adj, n, frame),
+                           compute_state_vector(new_adj, n, new_frame)):
             fails["state"] += 1
-        if not all(_conj_pauli(m, "Z") in ((1, "Z"), (1, "X")) for m in new_lu):
+        if not all(conj(c, "Z") in ((1, "Z"), (1, "X")) for c in new_frame):
             fails["restricted"] += 1
-        if tuple(info["f"]) != _shortlex_least_support(adj, n, lu):
+        if tuple(info["f"]) != _shortlex_least_support(adj, n, frame):
             fails["shortlex"] += 1
 
-        r_adj, r_lu, _, r_info = canonicalize_rref(adj, n, lu)
-        same = (r_adj == new_adj
-                and all(_clifford_key(a) == _clifford_key(b)
-                        for a, b in zip(r_lu, new_lu))
-                and r_info == info)
-        if not same:
+        r_adj, r_frame, _, r_info = canonicalize_rref(adj, n, frame)
+        if (r_adj, r_frame, r_info) != (new_adj, new_frame, info):
             fails["vs_rref"] += 1
 
     print(f"  trials              {trials}")

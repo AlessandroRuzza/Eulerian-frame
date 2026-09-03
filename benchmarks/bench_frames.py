@@ -55,7 +55,7 @@ Candidate    "euler": L_v stored as the signed images of X and Z -- the
     sub-fields rather than opaque 24x24 lookups memorised from brute force.
 
 All pair-space rules are DERIVED from the matrix toolkit at import time and
-verified exhaustively over the 24 Cliffords (see _verify_tables), so the
+verified exhaustively over the 24 Cliffords (see frames._verify), so the
 integer rules are machine-checked against the matrix semantics:
 
     right-fold V (byproducts, re-framing):     code -> TABLE_V[code]
@@ -64,7 +64,7 @@ integer rules are machine-checked against the matrix semantics:
       LC centre    (.HSH   ~ sqrt(-iX)):   w^N_v  -> -i w^C_v w^N_v
       LC neighbour (.S^dag ~ sqrt(-iZ)):   w^C_u  -> -i w^C_u w^N_u
       Z fold:                              w^C    -> -w^C
-    left-compose gate g (physical):            code -> LPAIR[g][code]
+    left-compose gate g (physical):            code -> LGATE[g][code]
     dagger (basis transport):                  code -> DAG_PAIR[code]
     measurement transport L^dag P L:           direct read of the pair
     CZ case split (w^N on the Z axis?):        code % 6 in {2, 5}
@@ -97,764 +97,35 @@ from random import Random
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from eulsim.cliffords import (          # noqa: E402
-    _H_U8, _HSDGH_U8, _HSH_U8, _IDENTITY_U8, _S_U8, _SDG_U8,
-    _X_U8, _Y_U8, _Z_U8,
-    _clifford_key, _conj_pauli, _dag_u8, _mat2x2_mul, _name_clifford,
+from eulsim.frames import (           # noqa: E402
+    AXES, GATE_U8, LGATE, PAIR_TO_MAT, VALID_PAIRS,
 )
-from eulsim.gates import (              # noqa: E402
-    _VOP_DECOMP, _Z_SET_KEYS, _all_cliffords_u8, _apply_cz_tableau,
-    _build_cz_index, _cz_block_lookup, _frame_rank,
+from eulsim.graphsim import (        # noqa: E402
+    CliffordIDSim, CliffordLUTSim, CliffordSim,
 )
+from eulsim.graphsim.tables import LID, cz_tables   # noqa: E402
+from eulsim.sim import EulerSim      # noqa: E402
+
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Signed-Pauli pair encoding and derived rule tables
+# Backends
 # ═══════════════════════════════════════════════════════════════════════════
-# Signed Pauli p in 0..5: p = axis + 3*sign_bit, axis X=0 Y=1 Z=2, sign 0=+.
-# Frame code = 6*w^C + w^N in 0..35 (24 valid: distinct axes).
-
-_AXL = "XYZ"
-NEG6 = [3, 4, 5, 0, 1, 2]
-ID_PAIR = 6 * 0 + 2                       # (w^C, w^N) = (+X, +Z): L = I
-
-# IPROD[p][q] = i * P_p * P_q for distinct axes (the Y image: L Y L^dag =
-# i w^C w^N). From P_a P_b = i eps_abc P_c: i P_a P_b = -eps_abc P_c.
-IPROD: list[list[int | None]] = [[None] * 6 for _ in range(6)]
-for _p in range(6):
-    for _q in range(6):
-        _a, _b = _p % 3, _q % 3
-        if _a == _b:
-            continue
-        _c = 3 - _a - _b
-        _neg = (_p // 3) ^ (_q // 3) ^ (1 if (_a + 1) % 3 == _b else 0)
-        IPROD[_p][_q] = _c + 3 * _neg
-
-
-def _enc(sign: int, letter: str) -> int:
-    return _AXL.index(letter) + (0 if sign > 0 else 3)
-
-
-def pair_from_mat(m: list[float]) -> int:
-    """Signed pair code of a Clifford matrix: (L X L^dag, L Z L^dag)."""
-    return 6 * _enc(*_conj_pauli(m, "X")) + _enc(*_conj_pauli(m, "Z"))
-
-
-_CLIFFS = _all_cliffords_u8()             # the 24 Cliffords mod phase, keyed
-PAIR_TO_MAT: dict[int, list[float]] = {pair_from_mat(m): m for m in _CLIFFS.values()}
-VALID_PAIRS = sorted(PAIR_TO_MAT)
-
-# ── whole-pair transition tables (one list read per frame update) ──────────
-RV_CENTER = [None] * 36   # . HS^dag H ~ sqrt(iX)   (R_v at the centre)
-RV_NEIGH = [None] * 36    # . S        ~ sqrt(iZ)   (R_v at a neighbour)
-LC_CENTER = [None] * 36   # . HSH      ~ sqrt(-iX)  (directed move, CZ path)
-LC_NEIGH = [None] * 36    # . S^dag    ~ sqrt(-iZ)
-ZFOLD = [None] * 36       # . Z  (measurement corrections, CZ signs)
-for _wc in range(6):
-    for _wn in range(6):
-        if _wc % 3 == _wn % 3:
-            continue
-        _cd = 6 * _wc + _wn
-        _y = IPROD[_wc][_wn]
-        RV_CENTER[_cd] = 6 * _wc + _y
-        RV_NEIGH[_cd] = 6 * _y + _wn
-        LC_CENTER[_cd] = 6 * _wc + NEG6[_y]
-        LC_NEIGH[_cd] = 6 * NEG6[_y] + _wn
-        ZFOLD[_cd] = 6 * NEG6[_wc] + _wn
-
-# ── dagger, decomposition words, left-composition, pending-basis tables ────
-DAG_PAIR = [None] * 36
-for _c, _m in PAIR_TO_MAT.items():
-    DAG_PAIR[_c] = pair_from_mat(_dag_u8(_m))
-
-DECOMP_PAIR = [None] * 36                 # same words as gates._VOP_DECOMP
-for _k, _m in _CLIFFS.items():
-    DECOMP_PAIR[pair_from_mat(_m)] = _VOP_DECOMP[_k]
-
-GATE_U8 = {"H": _H_U8, "S": _S_U8, "SDG": _SDG_U8,
-           "X": _X_U8, "Y": _Y_U8, "Z": _Z_U8}
-LPAIR: dict[str, list] = {}               # physical gate: code -> code
-for _g, _gm in GATE_U8.items():
-    _t6 = [0] * 6
-    for _p in range(3):
-        _s, _l = _conj_pauli(_gm, _AXL[_p])
-        _t6[_p] = _enc(_s, _l)
-        _t6[_p + 3] = NEG6[_t6[_p]]
-    _tp = [None] * 36
-    for _cd in VALID_PAIRS:
-        _tp[_cd] = 6 * _t6[_cd // 6] + _t6[_cd % 6]
-    LPAIR[_g] = _tp
-
-# pending measurement basis: conjugation by the U_w factor at the measured
-# vertex during the reduction chain (S^dag when re-framing a neighbour,
-# HSH when re-framing the vertex itself)
-PEND_SDG = [0] * 6
-PEND_HSH = [0] * 6
-for _p in range(3):
-    _s, _l = _conj_pauli(_SDG_U8, _AXL[_p])
-    PEND_SDG[_p] = _enc(_s, _l); PEND_SDG[_p + 3] = NEG6[PEND_SDG[_p]]
-    _s, _l = _conj_pauli(_HSH_U8, _AXL[_p])
-    PEND_HSH[_p] = _enc(_s, _l); PEND_HSH[_p + 3] = NEG6[PEND_HSH[_p]]
-
-
-def _verify_tables() -> None:
-    """Machine-check every integer rule against the matrix toolkit."""
-    for m in _CLIFFS.values():
-        c = pair_from_mat(m)
-        wc, wn = divmod(c, 6)
-        assert _enc(*_conj_pauli(m, "Y")) == IPROD[wc][wn]          # Y image
-        assert pair_from_mat(_mat2x2_mul(m, _HSDGH_U8)) == RV_CENTER[c]
-        assert pair_from_mat(_mat2x2_mul(m, _S_U8)) == RV_NEIGH[c]
-        assert pair_from_mat(_mat2x2_mul(m, _HSH_U8)) == LC_CENTER[c]
-        assert pair_from_mat(_mat2x2_mul(m, _SDG_U8)) == LC_NEIGH[c]
-        assert pair_from_mat(_mat2x2_mul(m, _Z_U8)) == ZFOLD[c]
-        assert pair_from_mat(_dag_u8(m)) == DAG_PAIR[c]
-        for g, gm in GATE_U8.items():
-            assert pair_from_mat(_mat2x2_mul(gm, m)) == LPAIR[g][c]
-        # Z-set membership (CZ commutation) <=> w^N = +Z exactly
-        assert (_clifford_key(m) in _Z_SET_KEYS) == (c % 6 == 2)
-    assert len(VALID_PAIRS) == 24
-
-
-_verify_tables()
-
-# ── coupled CZ block, re-indexed by pair codes / clifford keys / ids ───────
-_CZTAB: dict = {}          # keyed by (zeta, int_code_a, int_code_b, bool, bool)
-_CZTAB_KEY: dict = {}      # keyed by (zeta, clifford_key_a, clifford_key_b, bool, bool)
-_CZTAB_ID: dict = {}       # keyed by (zeta, opaque_id_a, opaque_id_b, bool, bool)
+# All four live in the package now, not in this file: the Eulerian candidate
+# is eulsim.sim.EulerSim (the in-place mirror of the functional core), and
+# the three VOP-storage baselines are eulsim.graphsim.  They share the graph
+# layer, the coupled CZ block table and the tableau fallback, so what differs
+# between them is exactly the frame representation.  The pair rule tables
+# themselves (eulsim.frames) are derived from the matrix toolkit at import
+# and machine-checked against it over all 24 Cliffords.
 
 
 def init_cz_tables() -> float:
-    """Precompute the coupled two-qubit block table for all three key types
-    (small ints for euler, _clifford_key tuples for cliffordlut, opaque ids
-    for cliffordid), warming the module's own matrix-keyed cache identically
-    along the way. One-time cost, returned in seconds (excluded from op
-    timings for ALL backends)."""
-    if _CZTAB:
-        return 0.0
+    """Warm the coupled two-qubit block table for every backend before any
+    timing starts, so the one-time build never lands inside a measured op.
+    Returns the seconds it took."""
     t0 = time.perf_counter()
-    keys = list(_build_cz_index()[0])
-    k2p = {k: pair_from_mat(_CLIFFS[k]) for k in keys}
-    for zeta in (0, 1):
-        for ka in keys:
-            for kb in keys:
-                for na in (False, True):
-                    for nb in (False, True):
-                        res = _cz_block_lookup(zeta, ka, kb, na, nb)
-                        if res is None:
-                            continue
-                        z2, ma2, mb2 = res
-                        _CZTAB[(zeta, k2p[ka], k2p[kb], na, nb)] = (
-                            z2, pair_from_mat(ma2), pair_from_mat(mb2))
-                        _CZTAB_KEY[(zeta, ka, kb, na, nb)] = (
-                            z2, _clifford_key(ma2), _clifford_key(mb2))
-                        _CZTAB_ID[(zeta, ID_OF_KEY[ka], ID_OF_KEY[kb], na, nb)] = (
-                            z2, ID_OF_KEY[_clifford_key(ma2)],
-                            ID_OF_KEY[_clifford_key(mb2)])
+    cz_tables()                      # builds the core table, then re-indexes
     return time.perf_counter() - t0
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Shared graph layer (identical code path for both simulators)
-# ═══════════════════════════════════════════════════════════════════════════
-
-def _lc_inplace(adj: list[set], v: int) -> None:
-    """tau_v in place: toggle all pairs inside N(v)."""
-    nb = sorted(adj[v])
-    for i, u in enumerate(nb):
-        au = adj[u]
-        for w in nb[i + 1:]:
-            if w in au:
-                au.discard(w); adj[w].discard(u)
-            else:
-                au.add(w); adj[w].add(u)
-
-
-def _toggle(adj: list[set], i: int, j: int) -> None:
-    if j in adj[i]:
-        adj[i].discard(j); adj[j].discard(i)
-    else:
-        adj[i].add(j); adj[j].add(i)
-
-
-def _set_edge(adj: list[set], i: int, j: int, bit: int) -> None:
-    if bit:
-        adj[i].add(j); adj[j].add(i)
-    else:
-        adj[i].discard(j); adj[j].discard(i)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Baseline: frames as 2x2 Clifford matrices (eulsim's representation)
-# ═══════════════════════════════════════════════════════════════════════════
-
-class CliffordSim:
-    """Mirror of eulsim's algorithms with in-place graph, frames = 8-float
-    matrices, all frame work through the module's own matrix toolkit."""
-
-    def __init__(self, adj: list[set], pair_codes: list[int]):
-        self.adj = [set(s) for s in adj]
-        self.f = [list(PAIR_TO_MAT[c]) for c in pair_codes]
-        self.n_diag = self.n_table = self.n_fallback = 0
-
-    # -- single-qubit physical gate (left composition) --
-    def apply_local(self, v: int, g8: list[float]) -> None:
-        self.f[v] = _mat2x2_mul(g8, self.f[v])
-
-    # -- re-framing move R_v: right-multiply (HS^dagH)_v, S_N(v); tau_v --
-    def reframe(self, v: int) -> None:
-        f = self.f
-        f[v] = _mat2x2_mul(f[v], _HSDGH_U8)
-        for u in self.adj[v]:
-            f[u] = _mat2x2_mul(f[u], _S_U8)
-        _lc_inplace(self.adj, v)
-
-    # -- directed move used by the CZ reduction (gates._lc_step) --
-    def _lc_step(self, v: int) -> None:
-        f = self.f
-        for u in self.adj[v]:
-            f[u] = _mat2x2_mul(f[u], _SDG_U8)
-        f[v] = _mat2x2_mul(f[v], _HSH_U8)
-        _lc_inplace(self.adj, v)
-
-    # -- Pauli measurement (graph_ops.do_measure, delete=False) --
-    def measure(self, v: int, basis: str, invert: bool = False) -> None:
-        f, adj = self.f, self.adj
-        sigma, Q = _conj_pauli(_dag_u8(f[v]), basis)     # basis transport
-        if Q == "X":
-            if not adj[v]:                               # deterministic
-                f[v] = list(_IDENTITY_U8)
-                return
-            b = min(adj[v], key=lambda j: (len(adj[j]), j))
-            self.reframe(b)                              # pending: conj by S^dag
-            s2, Q = _conj_pauli(_SDG_U8, Q)
-            sigma *= s2
-        if Q == "Y":
-            self.reframe(v)                              # pending: conj by HSH
-            s2, Q = _conj_pauli(_HSH_U8, Q)
-            sigma *= s2
-        if sigma * (-1 if invert else 1) == -1:          # Z-deletion correction
-            for u in adj[v]:
-                f[u] = _mat2x2_mul(f[u], _Z_U8)
-        for u in adj[v]:
-            adj[u].discard(v)
-        adj[v].clear()
-        f[v] = list(_IDENTITY_U8)
-
-    # -- CZ: local Anders-Briegel algorithm (gates.apply_cz) --
-    def _reduce_vop_at(self, a: int, avoid: int) -> None:
-        word = _VOP_DECOMP.get(_clifford_key(_dag_u8(self.f[a])))
-        if not word:
-            return
-        adj, f = self.adj, self.f
-        for mv in word:
-            if mv == "X":
-                self._lc_step(a)
-            else:
-                nb = [j for j in adj[a] if j != avoid] or list(adj[a])
-                if not nb:
-                    break
-                b = min(nb, key=lambda j: (_frame_rank(f[j]) == 0, j))
-                self._lc_step(b)
-
-    def cz(self, i: int, j: int) -> None:
-        adj, f = self.adj, self.f
-
-        def has_others(a: int, b: int) -> bool:
-            return any(k != b for k in adj[a])
-
-        both_zaxis = (_conj_pauli(f[i], "Z")[1] == "Z"
-                      and _conj_pauli(f[j], "Z")[1] == "Z")
-
-        def commutes(a: int) -> bool:
-            return both_zaxis or _clifford_key(f[a]) in _Z_SET_KEYS
-
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-        if has_others(j, i) and not commutes(j):
-            self._reduce_vop_at(j, avoid=i)
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-
-        sa, pa = _conj_pauli(f[i], "Z")
-        sb, pb = _conj_pauli(f[j], "Z")
-        if pa == "Z" and pb == "Z":                      # diagonal-axis case
-            self.n_diag += 1
-            _toggle(adj, i, j)
-            if sa < 0:
-                f[j] = _mat2x2_mul(f[j], _Z_U8)
-            if sb < 0:
-                f[i] = _mat2x2_mul(f[i], _Z_U8)
-            return
-        res = _cz_block_lookup(1 if j in adj[i] else 0,  # coupled block
-                               _clifford_key(f[i]), _clifford_key(f[j]),
-                               need_zplus_a=has_others(i, j),
-                               need_zplus_b=has_others(j, i))
-        if res is None:                                  # defensive fallback
-            self.n_fallback += 1
-            self._cz_fallback(i, j)
-            return
-        self.n_table += 1
-        zeta2, ma2, mb2 = res
-        _set_edge(adj, i, j, zeta2)
-        f[i], f[j] = list(ma2), list(mb2)
-
-    def _cz_fallback(self, i: int, j: int) -> None:
-        n = len(self.adj)
-        new_adj, new_lu = _apply_cz_tableau(self.adj, n, i, j, self.f)
-        self.adj = new_adj
-        self.f = new_lu
-
-    # -- equivalence hooks --
-    def pair_codes(self) -> list[int]:
-        return [pair_from_mat(m) for m in self.f]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Baseline+LUT: the SAME Clifford data, but table-driven too (fair rebuttal)
-# ═══════════════════════════════════════════════════════════════════════════
-# Every table here is built by literally running the matrix op once per one
-# of the 24 Cliffords and memoising the result under eulsim's own
-# _clifford_key -- correct by construction (no separate "derivation" to
-# verify, unlike IPROD/NEG6 below), but it does mean turning a *fresh*
-# matrix into a lookup key costs a phase-division + round each time
-# (_clifford_key); once a vertex's state IS a key (as here, kept as the
-# persistent per-vertex state, matrices reconstituted only for the CZ
-# tableau fallback) that cost is paid once at construction, matching
-# EulerSim's own zero-conversion steady state as closely as possible.
-
-KEY_TO_MAT: dict = {_clifford_key(m): m for m in _CLIFFS.values()}
-_ID_KEY = _clifford_key(_IDENTITY_U8)
-
-
-def _build_left_key_table(g8: list[float]) -> dict:
-    return {k: _clifford_key(_mat2x2_mul(g8, m)) for k, m in KEY_TO_MAT.items()}
-
-
-def _build_right_key_table(g8: list[float]) -> dict:
-    return {k: _clifford_key(_mat2x2_mul(m, g8)) for k, m in KEY_TO_MAT.items()}
-
-
-LKEY: dict[str, dict] = {g: _build_left_key_table(gm) for g, gm in GATE_U8.items()}
-RV_CENTER_KEY = _build_right_key_table(_HSDGH_U8)
-RV_NEIGH_KEY = _build_right_key_table(_S_U8)
-LC_CENTER_KEY = _build_right_key_table(_HSH_U8)
-LC_NEIGH_KEY = _build_right_key_table(_SDG_U8)
-ZFOLD_KEY = _build_right_key_table(_Z_U8)
-DAG_KEY = {k: _clifford_key(_dag_u8(m)) for k, m in KEY_TO_MAT.items()}
-
-# measurement basis transport L^dag P L, and the pending-basis factors used
-# mid-reduction -- the exact analogues of TRANSPORT/PEND_SDG/PEND_HSH above,
-# just keyed by _clifford_key instead of computed from an int pair.
-TRANSPORT_KEY = {k: {P: _conj_pauli(_dag_u8(m), P) for P in "XYZ"}
-                 for k, m in KEY_TO_MAT.items()}
-PEND_SDG_KEY = {P: _conj_pauli(_SDG_U8, P) for P in "XYZ"}
-PEND_HSH_KEY = {P: _conj_pauli(_HSH_U8, P) for P in "XYZ"}
-# CZ diagonal-axis test: w^N axis/sign, direct lookup (mirrors ZAXIS via %6)
-ZAXIS_KEY = {k: _conj_pauli(m, "Z") for k, m in KEY_TO_MAT.items()}
-
-
-class CliffordLUTSim:
-    """The fair competitor: state is still literally one of the 24
-    single-qubit Cliffords, but every per-vertex update -- gate composition,
-    re-framing, measurement transport, VOP decomposition, CZ's diagonal/
-    Z-set tests, the coupled CZ block -- is a dict lookup keyed by
-    _clifford_key, exactly mirroring what EulerSim does with its int code.
-    Demonstrates that "table lookup beats matrix multiply" is NOT specific
-    to the Eulerian-pair encoding; what IS specific to it is measured by the
-    remaining gap to EulerSim (see module docstring)."""
-
-    def __init__(self, adj: list[set], pair_codes: list[int]):
-        self.adj = [set(s) for s in adj]
-        self.f = [_clifford_key(PAIR_TO_MAT[c]) for c in pair_codes]
-        self.n_diag = self.n_table = self.n_fallback = 0
-
-    def apply_local(self, v: int, gate_name: str) -> None:
-        self.f[v] = LKEY[gate_name][self.f[v]]
-
-    def reframe(self, v: int) -> None:
-        f = self.f
-        f[v] = RV_CENTER_KEY[f[v]]
-        for u in self.adj[v]:
-            f[u] = RV_NEIGH_KEY[f[u]]
-        _lc_inplace(self.adj, v)
-
-    def _lc_step(self, v: int) -> None:
-        f = self.f
-        for u in self.adj[v]:
-            f[u] = LC_NEIGH_KEY[f[u]]
-        f[v] = LC_CENTER_KEY[f[v]]
-        _lc_inplace(self.adj, v)
-
-    def measure(self, v: int, basis: str, invert: bool = False) -> None:
-        f, adj = self.f, self.adj
-        sigma, Q = TRANSPORT_KEY[f[v]][basis]
-        if Q == "X":
-            if not adj[v]:
-                f[v] = _ID_KEY
-                return
-            b = min(adj[v], key=lambda j: (len(adj[j]), j))
-            self.reframe(b)
-            s2, Q = PEND_SDG_KEY[Q]
-            sigma *= s2
-        if Q == "Y":
-            self.reframe(v)
-            s2, Q = PEND_HSH_KEY[Q]
-            sigma *= s2
-        if sigma * (-1 if invert else 1) == -1:
-            for u in adj[v]:
-                f[u] = ZFOLD_KEY[f[u]]
-        for u in adj[v]:
-            adj[u].discard(v)
-        adj[v].clear()
-        f[v] = _ID_KEY
-
-    def _reduce_vop_at(self, a: int, avoid: int) -> None:
-        word = _VOP_DECOMP.get(DAG_KEY[self.f[a]])
-        if not word:
-            return
-        adj, f = self.adj, self.f
-        for mv in word:
-            if mv == "X":
-                self._lc_step(a)
-            else:
-                nb = [j for j in adj[a] if j != avoid] or list(adj[a])
-                if not nb:
-                    break
-                b = min(nb, key=lambda j: (f[j] == _ID_KEY, j))
-                self._lc_step(b)
-
-    def cz(self, i: int, j: int) -> None:
-        adj, f = self.adj, self.f
-
-        def has_others(a: int, b: int) -> bool:
-            return any(k != b for k in adj[a])
-
-        both_zaxis = ZAXIS_KEY[f[i]][1] == "Z" and ZAXIS_KEY[f[j]][1] == "Z"
-
-        def commutes(a: int) -> bool:
-            return both_zaxis or f[a] in _Z_SET_KEYS
-
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-        if has_others(j, i) and not commutes(j):
-            self._reduce_vop_at(j, avoid=i)
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-
-        sa, pa = ZAXIS_KEY[f[i]]
-        sb, pb = ZAXIS_KEY[f[j]]
-        if pa == "Z" and pb == "Z":
-            self.n_diag += 1
-            _toggle(adj, i, j)
-            if sa < 0:
-                f[j] = ZFOLD_KEY[f[j]]
-            if sb < 0:
-                f[i] = ZFOLD_KEY[f[i]]
-            return
-        res = _CZTAB_KEY.get((1 if j in adj[i] else 0, f[i], f[j],
-                              has_others(i, j), has_others(j, i)))
-        if res is None:
-            self.n_fallback += 1
-            self._cz_fallback(i, j)
-            return
-        self.n_table += 1
-        zeta2, ka2, kb2 = res
-        _set_edge(adj, i, j, zeta2)
-        f[i], f[j] = ka2, kb2
-
-    def _cz_fallback(self, i: int, j: int) -> None:
-        n = len(self.adj)
-        mats = [list(KEY_TO_MAT[k]) for k in self.f]
-        new_adj, new_lu = _apply_cz_tableau(self.adj, n, i, j, mats)
-        self.adj = new_adj
-        self.f = [_clifford_key(m) for m in new_lu]
-
-    def pair_codes(self) -> list[int]:
-        return [pair_from_mat(KEY_TO_MAT[k]) for k in self.f]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Baseline+ID: same 24 Cliffords, but an OPAQUE small int (not w^C/w^N)
-# ═══════════════════════════════════════════════════════════════════════════
-# A sharper version of the LUT rebuttal: 24 < 32 = 2^5, so a Clifford fits a
-# small int just as well as the pair code does. Is cliffordlut's residual
-# gap to euler just "tuple key vs int key" (should vanish here), or does
-# euler's SPECIFIC structured int -- decomposable into axis+sign via %3/%6
-# with no table at all -- buy something a bare opaque enumeration 0..23
-# does not? Assign each Clifford an id in BFS discovery order (unrelated to
-# w^C/w^N), and rebuild every table as a plain list indexed by that id,
-# exactly mirroring EulerSim's storage shape and access pattern.
-
-ID_OF_KEY: dict = {k: i for i, k in enumerate(KEY_TO_MAT)}
-ID_MAT: list = [KEY_TO_MAT[k] for k in KEY_TO_MAT]
-assert len(ID_MAT) == 24
-_ID_I = ID_OF_KEY[_ID_KEY]
-
-
-def _left_id_table(g8: list[float]) -> list:
-    return [ID_OF_KEY[_clifford_key(_mat2x2_mul(g8, m))] for m in ID_MAT]
-
-
-def _right_id_table(g8: list[float]) -> list:
-    return [ID_OF_KEY[_clifford_key(_mat2x2_mul(m, g8))] for m in ID_MAT]
-
-
-LID: dict[str, list] = {g: _left_id_table(gm) for g, gm in GATE_U8.items()}
-RV_CENTER_ID = _right_id_table(_HSDGH_U8)
-RV_NEIGH_ID = _right_id_table(_S_U8)
-LC_CENTER_ID = _right_id_table(_HSH_U8)
-LC_NEIGH_ID = _right_id_table(_SDG_U8)
-ZFOLD_ID = _right_id_table(_Z_U8)
-DAG_ID = [ID_OF_KEY[_clifford_key(_dag_u8(m))] for m in ID_MAT]
-TRANSPORT_ID = [{P: _conj_pauli(_dag_u8(m), P) for P in "XYZ"} for m in ID_MAT]
-ZAXIS_ID = [_conj_pauli(m, "Z") for m in ID_MAT]
-ZSET_ID = [_clifford_key(m) in _Z_SET_KEYS for m in ID_MAT]
-VOPDECOMP_ID = [None] * 24
-for _k, _i in ID_OF_KEY.items():
-    VOPDECOMP_ID[_i] = _VOP_DECOMP.get(_k)
-
-
-class CliffordIDSim:
-    """Same 24 Cliffords, but the per-vertex key is a bare *opaque* int
-    0..23 (BFS discovery order, no relation to w^C/w^N), with every table a
-    plain list -- matching EulerSim's storage shape exactly. Any residual
-    gap to euler now isolates "structured, arithmetically-decodable code"
-    from "compact list-indexed key", since both are equally compact ints."""
-
-    def __init__(self, adj: list[set], pair_codes: list[int]):
-        self.adj = [set(s) for s in adj]
-        self.f = [ID_OF_KEY[_clifford_key(PAIR_TO_MAT[c])] for c in pair_codes]
-        self.n_diag = self.n_table = self.n_fallback = 0
-
-    def apply_local(self, v: int, table: list) -> None:
-        self.f[v] = table[self.f[v]]
-
-    def reframe(self, v: int) -> None:
-        f = self.f
-        f[v] = RV_CENTER_ID[f[v]]
-        for u in self.adj[v]:
-            f[u] = RV_NEIGH_ID[f[u]]
-        _lc_inplace(self.adj, v)
-
-    def _lc_step(self, v: int) -> None:
-        f = self.f
-        for u in self.adj[v]:
-            f[u] = LC_NEIGH_ID[f[u]]
-        f[v] = LC_CENTER_ID[f[v]]
-        _lc_inplace(self.adj, v)
-
-    def measure(self, v: int, basis: str, invert: bool = False) -> None:
-        f, adj = self.f, self.adj
-        sigma, Q = TRANSPORT_ID[f[v]][basis]
-        if Q == "X":
-            if not adj[v]:
-                f[v] = _ID_I
-                return
-            b = min(adj[v], key=lambda j: (len(adj[j]), j))
-            self.reframe(b)
-            s2, Q = PEND_SDG_KEY[Q]
-            sigma *= s2
-        if Q == "Y":
-            self.reframe(v)
-            s2, Q = PEND_HSH_KEY[Q]
-            sigma *= s2
-        if sigma * (-1 if invert else 1) == -1:
-            for u in adj[v]:
-                f[u] = ZFOLD_ID[f[u]]
-        for u in adj[v]:
-            adj[u].discard(v)
-        adj[v].clear()
-        f[v] = _ID_I
-
-    def _reduce_vop_at(self, a: int, avoid: int) -> None:
-        word = VOPDECOMP_ID[DAG_ID[self.f[a]]]
-        if not word:
-            return
-        adj, f = self.adj, self.f
-        for mv in word:
-            if mv == "X":
-                self._lc_step(a)
-            else:
-                nb = [j for j in adj[a] if j != avoid] or list(adj[a])
-                if not nb:
-                    break
-                b = min(nb, key=lambda j: (f[j] == _ID_I, j))
-                self._lc_step(b)
-
-    def cz(self, i: int, j: int) -> None:
-        adj, f = self.adj, self.f
-
-        def has_others(a: int, b: int) -> bool:
-            return any(k != b for k in adj[a])
-
-        both_zaxis = ZAXIS_ID[f[i]][1] == "Z" and ZAXIS_ID[f[j]][1] == "Z"
-
-        def commutes(a: int) -> bool:
-            return both_zaxis or ZSET_ID[f[a]]
-
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-        if has_others(j, i) and not commutes(j):
-            self._reduce_vop_at(j, avoid=i)
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-
-        sa, pa = ZAXIS_ID[f[i]]
-        sb, pb = ZAXIS_ID[f[j]]
-        if pa == "Z" and pb == "Z":
-            self.n_diag += 1
-            _toggle(adj, i, j)
-            if sa < 0:
-                f[j] = ZFOLD_ID[f[j]]
-            if sb < 0:
-                f[i] = ZFOLD_ID[f[i]]
-            return
-        res = _CZTAB_ID.get((1 if j in adj[i] else 0, f[i], f[j],
-                             has_others(i, j), has_others(j, i)))
-        if res is None:
-            self.n_fallback += 1
-            self._cz_fallback(i, j)
-            return
-        self.n_table += 1
-        zeta2, ia2, ib2 = res
-        _set_edge(adj, i, j, zeta2)
-        f[i], f[j] = ia2, ib2
-
-    def _cz_fallback(self, i: int, j: int) -> None:
-        n = len(self.adj)
-        mats = [list(ID_MAT[k]) for k in self.f]
-        new_adj, new_lu = _apply_cz_tableau(self.adj, n, i, j, mats)
-        self.adj = new_adj
-        self.f = [ID_OF_KEY[_clifford_key(m)] for m in new_lu]
-
-    def pair_codes(self) -> list[int]:
-        return [pair_from_mat(ID_MAT[k]) for k in self.f]
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Candidate: frames as signed Pauli-image pairs (one int per vertex)
-# ═══════════════════════════════════════════════════════════════════════════
-
-class EulerSim:
-    """Identical algorithms; frame = int code 6*w^C + w^N. Every frame update
-    is one table read, every semantic test an integer compare."""
-
-    def __init__(self, adj: list[set], pair_codes: list[int]):
-        self.adj = [set(s) for s in adj]
-        self.f = list(pair_codes)
-        self.n_diag = self.n_table = self.n_fallback = 0
-
-    def apply_local(self, v: int, table: list) -> None:
-        self.f[v] = table[self.f[v]]
-
-    def reframe(self, v: int) -> None:
-        f, rvn = self.f, RV_NEIGH
-        f[v] = RV_CENTER[f[v]]
-        for u in self.adj[v]:
-            f[u] = rvn[f[u]]
-        _lc_inplace(self.adj, v)
-
-    def _lc_step(self, v: int) -> None:
-        f, lcn = self.f, LC_NEIGH
-        for u in self.adj[v]:
-            f[u] = lcn[f[u]]
-        f[v] = LC_CENTER[f[v]]
-        _lc_inplace(self.adj, v)
-
-    def measure(self, v: int, ax: int, invert: bool = False) -> None:
-        f, adj = self.f, self.adj
-        wc, wn = divmod(f[v], 6)
-        if wc % 3 == ax:                                 # transport: direct read
-            sig, q = wc // 3, 0
-        elif wn % 3 == ax:
-            sig, q = wn // 3, 2
-        else:
-            wy = IPROD[wc][wn]
-            sig, q = wy // 3, 1
-        if q == 0:
-            if not adj[v]:                               # deterministic
-                f[v] = ID_PAIR
-                return
-            b = min(adj[v], key=lambda j: (len(adj[j]), j))
-            self.reframe(b)
-            t = PEND_SDG[0]
-            sig ^= t // 3; q = t % 3
-        if q == 1:
-            self.reframe(v)
-            t = PEND_HSH[1]
-            sig ^= t // 3; q = t % 3
-        if sig ^ (1 if invert else 0):                   # Z-deletion correction
-            zf = ZFOLD
-            for u in adj[v]:
-                f[u] = zf[f[u]]
-        for u in adj[v]:
-            adj[u].discard(v)
-        adj[v].clear()
-        f[v] = ID_PAIR
-
-    def _reduce_vop_at(self, a: int, avoid: int) -> None:
-        word = DECOMP_PAIR[DAG_PAIR[self.f[a]]]
-        if not word:
-            return
-        adj, f = self.adj, self.f
-        for mv in word:
-            if mv == "X":
-                self._lc_step(a)
-            else:
-                nb = [j for j in adj[a] if j != avoid] or list(adj[a])
-                if not nb:
-                    break
-                b = min(nb, key=lambda j: (f[j] == ID_PAIR, j))
-                self._lc_step(b)
-
-    def cz(self, i: int, j: int) -> None:
-        adj, f = self.adj, self.f
-
-        def has_others(a: int, b: int) -> bool:
-            return any(k != b for k in adj[a])
-
-        both_zaxis = (f[i] % 6) % 3 == 2 and (f[j] % 6) % 3 == 2
-
-        def commutes(a: int) -> bool:
-            return both_zaxis or f[a] % 6 == 2           # Z-set: w^N = +Z
-
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-        if has_others(j, i) and not commutes(j):
-            self._reduce_vop_at(j, avoid=i)
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-
-        wni, wnj = f[i] % 6, f[j] % 6
-        if wni % 3 == 2 and wnj % 3 == 2:                # diagonal-axis case
-            self.n_diag += 1
-            _toggle(adj, i, j)
-            if wni == 5:                                 # w^N_i = -Z
-                f[j] = ZFOLD[f[j]]
-            if wnj == 5:
-                f[i] = ZFOLD[f[i]]
-            return
-        res = _CZTAB.get((1 if j in adj[i] else 0, f[i], f[j],
-                          has_others(i, j), has_others(j, i)))
-        if res is None:
-            self.n_fallback += 1
-            self._cz_fallback(i, j)
-            return
-        self.n_table += 1
-        zeta2, pa2, pb2 = res
-        _set_edge(adj, i, j, zeta2)
-        f[i], f[j] = pa2, pb2
-
-    def _cz_fallback(self, i: int, j: int) -> None:
-        n = len(self.adj)
-        mats = [list(PAIR_TO_MAT[c]) for c in self.f]
-        new_adj, new_lu = _apply_cz_tableau(self.adj, n, i, j, mats)
-        self.adj = new_adj
-        self.f = [pair_from_mat(m) for m in new_lu]
-
-    def pair_codes(self) -> list[int]:
-        return list(self.f)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Random states, abstract ops, adapters
@@ -917,7 +188,7 @@ def gen_ops(rng: Random, n: int, count: int, kind: str | None = None) -> list:
 
 SIM_CLASSES = {"clifford": CliffordSim, "cliffordlut": CliffordLUTSim,
                "cliffordid": CliffordIDSim, "euler": EulerSim}
-_GATE_ARG = {"clifford": GATE_U8, "cliffordlut": None, "cliffordid": LID, "euler": LPAIR}
+_GATE_ARG = {"clifford": GATE_U8, "cliffordlut": None, "cliffordid": LID, "euler": LGATE}
 
 
 def bind_ops(sim, ops: list, backend: str) -> list:
@@ -938,7 +209,7 @@ def bind_ops(sim, ops: list, backend: str) -> list:
             calls.append((sim.reframe, (op[1],)))
         elif k == "m":
             calls.append((sim.measure,
-                          (op[1], op[2] if euler else _AXL[op[2]], op[3])))
+                          (op[1], op[2] if euler else AXES[op[2]], op[3])))
         else:
             calls.append((sim.cz, (op[1], op[2])))
     return calls
@@ -949,33 +220,34 @@ def bind_ops(sim, ops: list, backend: str) -> list:
 # ═══════════════════════════════════════════════════════════════════════════
 
 class ModuleRef:
-    """The unmodified eulsim functions (adjacency-set state), as ground truth."""
+    """The functional eulsim API (copy-in/copy-out, as the server calls it),
+    used as ground truth for the in-place backends."""
 
     def __init__(self, adj: list[set], pair_codes: list[int]):
-        from eulsim.graph_ops import do_measure, reframe_move
         from eulsim.gates import apply_cz
+        from eulsim.graph_ops import do_measure, reframe_move
         self._do_measure, self._reframe_move, self._apply_cz = \
             do_measure, reframe_move, apply_cz
         self.n = len(adj)
         self.adj = [set(s) for s in adj]
-        self.mats = [list(PAIR_TO_MAT[c]) for c in pair_codes]
+        self.f = list(pair_codes)
 
-    def apply_local(self, v, g8):
-        self.mats[v] = _mat2x2_mul(g8, self.mats[v])
+    def apply_local(self, v, gate_name):
+        self.f[v] = LGATE[gate_name][self.f[v]]
 
     def reframe(self, v):
-        self.adj, _, self.mats = self._reframe_move(self.adj, self.n, v, self.mats)
+        self.adj, _, self.f = self._reframe_move(self.adj, self.n, v, self.f)
 
     def measure(self, v, basis, invert):
-        self.adj, _, _, self.mats = self._do_measure(
-            self.adj, self.n, v, basis.lower(), self.mats,
+        self.adj, _, _, self.f = self._do_measure(
+            self.adj, self.n, v, basis.lower(), self.f,
             delete=False, invert=invert)
 
     def cz(self, i, j):
-        self.adj, self.mats = self._apply_cz(self.adj, self.n, i, j, self.mats)
+        self.adj, self.f = self._apply_cz(self.adj, self.n, i, j, self.f)
 
     def pair_codes(self):
-        return [pair_from_mat(m) for m in self.mats]
+        return list(self.f)
 
     def adj_sets(self):
         return [set(s) for s in self.adj]
@@ -997,11 +269,11 @@ def selftest(seeds: int = 4) -> None:
                 fn(*args)
             k = op[0]
             if k == "g":
-                r.apply_local(op[1], GATE_U8[op[2]])
+                r.apply_local(op[1], op[2])
             elif k == "r":
                 r.reframe(op[1])
             elif k == "m":
-                r.measure(op[1], _AXL[op[2]], op[3])
+                r.measure(op[1], AXES[op[2]], op[3])
             else:
                 r.cz(op[1], op[2])
             ctx = f"seed={seed} step={t} op={op}"
@@ -1240,7 +512,7 @@ def _memory_report() -> None:
 # ═══════════════════════════════════════════════════════════════════════════
 
 def _pstr(p: int | None) -> str:
-    return "." if p is None else ("+-"[p // 3] + _AXL[p % 3])
+    return "." if p is None else ("+-"[p // 3] + AXES[p % 3])
 
 
 def print_tables() -> None:
@@ -1264,7 +536,7 @@ def print_tables() -> None:
     print("  Z fold        w^C -> -w^C             ZFOLD")
     print("\nleft-compose (physical gates), code -> code over the 24 pairs:")
     for g in GNAMES:
-        row = "  ".join(f"{c}>{LPAIR[g][c]}" for c in VALID_PAIRS)
+        row = "  ".join(f"{c}>{LGATE[g][c]}" for c in VALID_PAIRS)
         print(f"  {g:<4} {row}")
     print("\nmeasurement transport (L^dag P L), direct read of the pair:")
     print("  axis(w^C)=P -> measure X with sign(w^C); axis(w^N)=P -> Z with"

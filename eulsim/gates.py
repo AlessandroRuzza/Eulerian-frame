@@ -1,143 +1,85 @@
 """Two-qubit gate application: CZ/CX/CY on framed graph states.
 
-The local Anders-Briegel algorithm (quant-ph/0504117) in Eulerian-vector
-form: frame reduction (remove_VOP) by re-framing moves, the diagonal-axis
+The local Anders-Briegel algorithm (quant-ph/0504117) in Eulerian-frame form:
+frame reduction (their remove_VOP) by re-framing moves, the diagonal-axis
 edge toggle, and the brute-forced coupled two-qubit block table, with a
 global tableau reduction as defensive fallback.
+
+Only the operands' neighbourhoods are ever touched; the case split is decided
+by integer tests on the frame codes (``frames.is_zaxis`` / ``frames.in_zset``).
 """
 from __future__ import annotations
 
-import numpy as np
-
-from .cliffords import (
-    _H_U8,
-    _HSH_U8,
-    _IDENTITY_U8,
-    _S_U8,
-    _SDG_U8,
-    _Z_U8,
-    _clifford_key,
-    _conj_pauli,
-    _dag_u8,
-    _mat2x2_mul,
-    _parse_mats,
+from .frames import (
+    DAG,
+    DECOMP,
+    ID_PAIR,
+    LC_CENTER,
+    LC_NEIGH,
+    PAIR_TO_MAT,
+    VALID_PAIRS,
+    ZFOLD,
+    in_zset,
+    is_zaxis,
+    left_compose,
+    parse_frame,
 )
-from .graph_ops import copy_adj, local_complement, set_edge, toggle_edge
+from .graph_ops import copy_adj, lc_inplace, set_edge, toggle_edge
 from .tableau import _PAULI_MUL, _reduce_tableau, _tableau_from_state
 
 # ── Frame reduction (Anders-Briegel remove_VOP, quant-ph/0504117) ─────────────
-# The frame matrices L_i play the role of the paper's vertex operators (VOPs).
+# The frame letters L_i play the role of the paper's vertex operators (VOPs).
 # A VOP is reduced to the identity by burning, factor by factor, its shortest
-# decomposition into the generators √(-iX) ∝ HSH and √(iZ) ∝ S†:
-#   · a √(-iX) factor is produced by a re-framing move at the vertex,
-#   · a √(iZ) factor by one at a neighbour (the "swapping partner"),
+# decomposition (frames.DECOMP) into the generators √(-iX) ∝ HSH and
+# √(iZ) ∝ S†:
+#   · an "X" letter is produced by a re-framing move at the vertex,
+#   · a "Z" letter by one at a neighbour (the "swapping partner"),
 # each applied with the state-preserving frame update of _lc_step
-# (Corollary 1 of the paper). Used by the local CZ algorithm below.
-
-_I_KEY = _clifford_key(_IDENTITY_U8)
-# The paper's Z = {I, Z, S, S†}: the local Cliffords commuting with CZ.
-_Z_SET_KEYS = frozenset(
-    _clifford_key(m) for m in (_IDENTITY_U8, _Z_U8, _S_U8, _SDG_U8))
+# (Corollary 1 of the paper).
 
 
-def _build_vop_decomp() -> dict:
-    """Paper's decomposition look-up table: for each of the 24 local Cliffords
-    (mod phase) a shortest word over {HSH ∝ √(-iX), S† ∝ √(iZ)} whose product
-    is ∝ that Clifford: tbl[key(g1·g2·…·gk)] = "XZ…" with X ↦ HSH, Z ↦ S†."""
-    from collections import deque
-    tbl = {_I_KEY: ""}
-    q = deque([(_IDENTITY_U8, "")])
-    while q:
-        m, w = q.popleft()
-        for mv, g in (("X", _HSH_U8), ("Z", _SDG_U8)):
-            m2 = _mat2x2_mul(m, g)
-            k = _clifford_key(m2)
-            if k not in tbl:
-                tbl[k] = w + mv
-                q.append((m2, w + mv))
-    return tbl
-
-
-_VOP_DECOMP = _build_vop_decomp()
-
-
-def _lc_step(adj: list[set[int]], n: int, v: int, mats: list) -> list[set[int]]:
+def _lc_step(adj: list[set[int]], v: int, f: list[int]) -> None:
     """One local complementation τ_v with the state-preserving frame update
     L_v ↦ L_v·HSH, L_u ↦ L_u·S† for u ∈ N(v) — the *directed* re-framing move
     R_v⁻¹ = R_v³ (right-multiply U_v instead of U_v†; both directions preserve
     the state since U_v² = K_v stabilises |G⟩). Kept in this direction because
-    the VOP decomposition words of _VOP_DECOMP burn {HSH, S†} letters.
-    Mutates mats in place; returns the new adjacency."""
-    for j in adj[v]:
-        mats[j] = _mat2x2_mul(mats[j], _SDG_U8)
-    mats[v] = _mat2x2_mul(mats[v], _HSH_U8)
-    new_adj, _ = local_complement(adj, n, v)
-    return new_adj
+    the decomposition words of frames.DECOMP burn {HSH, S†} letters.
+    Mutates adj and f in place."""
+    for u in adj[v]:
+        f[u] = LC_NEIGH[f[u]]
+    f[v] = LC_CENTER[f[v]]
+    lc_inplace(adj, v)
 
 
-def _frame_rank(m: list[float]) -> int:
-    """0: ∝ I.  1: in Z = {I,Z,S,S†} (commutes with CZ).  2: other."""
-    k = _clifford_key(m)
-    if k == _I_KEY:
-        return 0
-    return 1 if k in _Z_SET_KEYS else 2
-
-
-def _reduce_vop_at(adj: list[set[int]], n: int, a: int, mats: list,
-                   avoid: int | None = None) -> list[set[int]]:
+def _reduce_vop_at(adj: list[set[int]], a: int, f: list[int],
+                   avoid: int | None = None) -> None:
     """remove_VOP at vertex a (Anders-Briegel / notes-EulVec-Rep-Operations
     Sec. "Frame reduction"): burn the frame's shortest decomposition over
-    {√(-iX) ∝ HSH, √(iZ) ∝ S†} by re-framing moves — an X-letter by a move at
-    a itself, a Z-letter by one at a swapping partner b ∈ N(a), preferring
-    partners ≠ avoid. Every move is state-preserving. Mutates mats in place;
-    returns the new adjacency."""
-    word = _VOP_DECOMP.get(_clifford_key(_dag_u8(mats[a])))
-    if word is None:
-        return adj
+    {√(-iX) ∝ HSH, √(iZ) ∝ S†} by re-framing moves — an "X" letter by a move
+    at a itself, a "Z" letter by one at a swapping partner b ∈ N(a),
+    preferring partners ≠ avoid. Every move is state-preserving."""
+    word = DECOMP[DAG[f[a]]]
+    if not word:
+        return
     for mv in word:
         if mv == "X":                    # burn √(-iX): re-frame at a itself
-            adj = _lc_step(adj, n, a, mats)
+            _lc_step(adj, a, f)
         else:                            # burn √(iZ): re-frame at a partner
-            nb = [j for j in adj[a] if j != avoid]
-            if not nb:
-                nb = list(adj[a])
+            nb = [j for j in adj[a] if j != avoid] or list(adj[a])
             if not nb:
                 break                    # isolated vertex: no partner available
-            b = min(nb, key=lambda j: (_frame_rank(mats[j]) == 0, j))
-            adj = _lc_step(adj, n, b, mats)
-    return adj
+            b = min(nb, key=lambda j: (f[j] == ID_PAIR, j))
+            _lc_step(adj, b, f)
 
 
 # ── The coupled two-qubit CZ block (the 2·24² table of Anders-Briegel) ────────
 # When an operand's frame cannot be reduced away (its only neighbour is the
-# other operand), the two operand pairs are coupled and the transition function
-# is genuinely table-shaped (notes-EulVec-Rep-Operations, Remark 2). The table
-# is brute-forced on two-qubit stabilizer states and cached.
+# other operand), the two operand frames are coupled and the transition
+# function is genuinely table-shaped (notes-EulVec-Rep-Operations, Remark 2).
+# The table is brute-forced once on two-qubit stabilizer states, keyed by
+# frame codes, and cached for the life of the process.
 
-_CZ_INDEX: tuple | None = None
-_CZ_LOOKUP_CACHE: dict = {}
-
-
-def _u8_to_np(m: list[float]):
-    return np.array([[complex(m[0], m[1]), complex(m[2], m[3])],
-                     [complex(m[4], m[5]), complex(m[6], m[7])]])
-
-
-def _all_cliffords_u8() -> dict:
-    """The 24 single-qubit Cliffords (mod phase) as 8-float matrices, keyed by
-    _clifford_key, from a BFS over words in {H, S}."""
-    from collections import deque
-    out = {_clifford_key(_IDENTITY_U8): list(_IDENTITY_U8)}
-    q = deque([list(_IDENTITY_U8)])
-    while q:
-        m = q.popleft()
-        for g in (_H_U8, _S_U8):
-            m2 = _mat2x2_mul(g, m)
-            k = _clifford_key(m2)
-            if k not in out:
-                out[k] = m2
-                q.append(m2)
-    return out
+_CZTAB: dict | None = None
 
 
 def _state_key_2q(psi) -> tuple:
@@ -147,65 +89,78 @@ def _state_key_2q(psi) -> tuple:
     return tuple(round(x, 6) + 0.0 for c in psi for x in (c.real, c.imag))
 
 
-def _build_cz_index() -> tuple:
-    """Enumerate all framed two-qubit representatives (ζ, L_a, L_b) ↦ state
-    (L_a ⊗ L_b)·CZ^ζ|++⟩ and index them by phase-canonical state key."""
-    global _CZ_INDEX
-    if _CZ_INDEX is None:
-        cliffs = _all_cliffords_u8()
-        plus = np.full(4, 0.5, dtype=complex)
-        czm = np.diag([1, 1, 1, -1]).astype(complex)
-        mats_np = {k: _u8_to_np(m) for k, m in cliffs.items()}
-        index: dict = {}
-        for zeta in (0, 1):
-            base = czm @ plus if zeta else plus
-            for ka, Ma in mats_np.items():
-                for kb, Mb in mats_np.items():
-                    psi = np.kron(Ma, Mb) @ base
-                    index.setdefault(_state_key_2q(psi), []).append((zeta, ka, kb))
-        _CZ_INDEX = (cliffs, index)
-    return _CZ_INDEX
+def build_cz_table() -> dict:
+    """Enumerate every framed two-qubit representative (ζ, L_a, L_b) ↦ state
+    (L_a ⊗ L_b)·CZ^ζ|++⟩, then read off the transition
 
+        CZ·(L_a⊗L_b)·CZ^ζ|++⟩ ∝ (L'_a⊗L'_b)·CZ^{ζ'}|++⟩.
 
-def _cz_block_lookup(zeta: int, key_a: tuple, key_b: tuple,
-                     need_zplus_a: bool, need_zplus_b: bool):
-    """Transition of the coupled block: find (ζ', L'_a, L'_b) with
-    CZ·(L_a⊗L_b)·CZ^ζ|++⟩ ∝ (L'_a⊗L'_b)·CZ^{ζ'}|++⟩.
-    Among the sign-redundant representatives prefer, per the paper's
-    Constraint 1, outputs keeping w^N = +Z (frame ∈ {I,Z,S,S†}) on operands
-    that still carry external CZ edges (need_zplus_*), so the new frame
-    commutes back through those edges. Returns (ζ', mat_a, mat_b) or None."""
-    ck = (zeta, key_a, key_b, need_zplus_a, need_zplus_b)
-    if ck in _CZ_LOOKUP_CACHE:
-        return _CZ_LOOKUP_CACHE[ck]
-    cliffs, index = _build_cz_index()
+    Among the sign-redundant representatives it keeps, per the paper's
+    Constraint 1, an output with w^N = +Z (frame in the Z-set {I,Z,S,S†}) on
+    each operand that still carries external CZ edges, so the new frame
+    commutes back through those edges — hence the (need_a, need_b) key.
+    Entries with no such representative are simply absent; apply_cz then
+    falls back to the tableau route.
+
+    Several representatives usually qualify.  The tie is broken by
+    (ζ', phase-canonical key of L'_a, phase-canonical key of L'_b), which is
+    an arbitrary but *fixed* rule: any winner describes the same physical
+    state, and pinning it keeps the frame this simulator reports — and the
+    diagonal/table path split the benchmarks measure — reproducible.
+
+    Returns {(ζ, code_a, code_b, need_a, need_b): (ζ', code_a', code_b')}."""
+    global _CZTAB
+    if _CZTAB is not None:
+        return _CZTAB
+    import numpy as np
+
+    def u8_to_np(m):
+        return np.array([[complex(m[0], m[1]), complex(m[2], m[3])],
+                         [complex(m[4], m[5]), complex(m[6], m[7])]])
+
     plus = np.full(4, 0.5, dtype=complex)
     czm = np.diag([1, 1, 1, -1]).astype(complex)
-    base = czm @ plus if zeta else plus
-    target = czm @ (np.kron(_u8_to_np(cliffs[key_a]), _u8_to_np(cliffs[key_b])) @ base)
-    cands = index.get(_state_key_2q(target), [])
-    best = None
-    for z2, ka2, kb2 in cands:
-        cost = ((1 if need_zplus_a and ka2 not in _Z_SET_KEYS else 0)
-                + (1 if need_zplus_b and kb2 not in _Z_SET_KEYS else 0))
-        entry = (cost, z2, ka2, kb2)
-        if best is None or entry < best:
-            best = entry
-    res = None
-    if best is not None and best[0] == 0:
-        res = (best[1], list(cliffs[best[2]]), list(cliffs[best[3]]))
-    _CZ_LOOKUP_CACHE[ck] = res
-    return res
+    mats = {c: u8_to_np(PAIR_TO_MAT[c]) for c in VALID_PAIRS}
+
+    from .cliffords import _clifford_key
+    ckey = {c: _clifford_key(PAIR_TO_MAT[c]) for c in VALID_PAIRS}
+
+    states: dict[tuple, list] = {}
+    prepared: dict = {}
+    for zeta in (0, 1):
+        base = czm @ plus if zeta else plus
+        for ca in VALID_PAIRS:
+            for cb in VALID_PAIRS:
+                psi = np.kron(mats[ca], mats[cb]) @ base
+                prepared[(zeta, ca, cb)] = psi
+                states.setdefault(_state_key_2q(psi), []).append((zeta, ca, cb))
+
+    tab: dict = {}
+    for (zeta, ca, cb), psi in prepared.items():
+        cands = states.get(_state_key_2q(czm @ psi), [])
+        for na in (False, True):
+            for nb in (False, True):
+                best = None
+                for z2, ca2, cb2 in cands:
+                    if (na and not in_zset(ca2)) or (nb and not in_zset(cb2)):
+                        continue
+                    entry = (z2, ckey[ca2], ckey[cb2], ca2, cb2)
+                    if best is None or entry < best:
+                        best = entry
+                if best is not None:
+                    tab[(zeta, ca, cb, na, nb)] = (best[0], best[3], best[4])
+    _CZTAB = tab
+    return tab
 
 
 def _apply_cz_tableau(adj: list[set[int]], n: int, i: int, j: int,
-                      mats: list) -> tuple[list[set[int]], list[list[float]]]:
+                      f: list[int]) -> tuple[list[set[int]], list[int]]:
     """Fallback CZ path: conjugate the stabilizer tableau by CZ_ij
     (X_i↦X_iZ_j, Y_i↦Y_iZ_j, Z_i↦Z_i, symmetric in j), then reduce globally."""
-    tab = _tableau_from_state(adj, n, mats)
+    tab = _tableau_from_state(adj, n, f)
     for g in tab:                                # conjugate each generator by CZ_ij
         L = g[1]
-        ai = L[i] in ("X", "Y")                  # i has X-component (anticommutes with Z_i)
+        ai = L[i] in ("X", "Y")                  # i has X-component
         aj = L[j] in ("X", "Y")
         k = 0
         if aj:                                   # → append Z on qubit i: L[i]·Z
@@ -214,15 +169,14 @@ def _apply_cz_tableau(adj: list[set[int]], n: int, i: int, j: int,
             kk, r = _PAULI_MUL[("Z", L[j])]; k += kk; L[j] = r
         if k % 4 == 2:
             g[0] = -g[0]
-    new_adj, new_lu, _ = _reduce_tableau(tab, n)
-    return new_adj, new_lu
+    new_adj, new_f, _ = _reduce_tableau(tab, n)
+    return new_adj, new_f
 
 
 def apply_cz(adj: list[set[int]], n: int, i: int, j: int,
-             local_unitaries: list | None = None
-             ) -> tuple[list[set[int]], list[list[float]]]:
+             frame: list | None = None) -> tuple[list[set[int]], list[int]]:
     """Apply a physical CZ_ij gate to |ψ⟩ = (⊗L_k)|G⟩ by the *local* algorithm
-    of Anders-Briegel Sec. III.2 in Eulerian-vector form
+    of Anders-Briegel Sec. III.2 in Eulerian-frame form
     (notes-EulVec-Rep-Operations):
       1-3. reduce the operand frames by state-preserving re-framing moves,
            choosing swapping partners among non-operand neighbours — skipped
@@ -230,15 +184,14 @@ def apply_cz(adj: list[set[int]], n: int, i: int, j: int,
            the Z axis, handled by step 4's sign folds, or a frame in the
            Z-set {I,Z,S,S†}), keeping the rewrite minimal;
       4.   if both Eulerian entries lie on the Z axis (w^N ∈ {±Z} — the signed
-           extension of the paper's Z-set {I,Z,S,S†}), CZ is an edge toggle
-           plus a Z-fold on the other operand for each -Z sign;
+           extension of the paper's Z-set), CZ is an edge toggle plus a Z-fold
+           on the other operand for each -Z sign;
       5.   otherwise the operands form a coupled two-qubit block: apply the
            brute-forced 2·24² transition table.
-    Unlike the previous global tableau reduction, only the operands'
-    neighbourhoods are touched. Returns (new_adj, new_local_unitaries)."""
+    Returns (new_adj, new_frame)."""
+    f = parse_frame(n, frame)
     if n == 0 or i == j or not (0 <= i < n and 0 <= j < n):
-        return copy_adj(adj), _parse_mats(n, local_unitaries)
-    mats = _parse_mats(n, local_unitaries)
+        return copy_adj(adj), f
     cur = copy_adj(adj)
 
     def has_others(a: int, b: int) -> bool:      # non-operand neighbours of a?
@@ -256,64 +209,61 @@ def apply_cz(adj: list[set[int]], n: int, i: int, j: int,
     # move site itself (the partner search avoids it), so it only ever
     # receives the neighbour factor S† — a right-multiplied diagonal, which
     # changes neither w^N nor Z-set membership.
-    def _zaxis(a: int) -> bool:
-        return _conj_pauli(mats[a], "Z")[1] == "Z"
-    both_zaxis = _zaxis(i) and _zaxis(j)
+    both_zaxis = is_zaxis(f[i]) and is_zaxis(f[j])
 
     def commutes(a: int) -> bool:
-        return both_zaxis or _clifford_key(mats[a]) in _Z_SET_KEYS
+        return both_zaxis or in_zset(f[a])
 
     if has_others(i, j) and not commutes(i):
-        cur = _reduce_vop_at(cur, n, i, mats, avoid=j)
+        _reduce_vop_at(cur, i, f, avoid=j)
     if has_others(j, i) and not commutes(j):
-        cur = _reduce_vop_at(cur, n, j, mats, avoid=i)
+        _reduce_vop_at(cur, j, f, avoid=i)
     if has_others(i, j) and not commutes(i):
-        cur = _reduce_vop_at(cur, n, i, mats, avoid=j)   # step 2 may de-reduce i
+        _reduce_vop_at(cur, i, f, avoid=j)       # step 2 may de-reduce i
 
-    sa, pa = _conj_pauli(mats[i], "Z")           # w^N of the operands
-    sb, pb = _conj_pauli(mats[j], "Z")
-    if pa == "Z" and pb == "Z":                  # 4. diagonal-axis case
+    wni, wnj = f[i] % 6, f[j] % 6                # w^N of the operands
+    if wni % 3 == 2 and wnj % 3 == 2:            # 4. diagonal-axis case
         toggle_edge(cur, i, j)
-        if sa < 0:                               # w^N_i = -Z → fold Z at j
-            mats[j] = _mat2x2_mul(mats[j], _Z_U8)
-        if sb < 0:                               # w^N_j = -Z → fold Z at i
-            mats[i] = _mat2x2_mul(mats[i], _Z_U8)
-        return cur, mats
+        if wni == 5:                             # w^N_i = -Z → fold Z at j
+            f[j] = ZFOLD[f[j]]
+        if wnj == 5:                             # w^N_j = -Z → fold Z at i
+            f[i] = ZFOLD[f[i]]
+        return cur, f
 
-    res = _cz_block_lookup(                      # 5. coupled two-qubit block
-        1 if j in cur[i] else 0, _clifford_key(mats[i]), _clifford_key(mats[j]),
-        need_zplus_a=has_others(i, j), need_zplus_b=has_others(j, i))
+    res = build_cz_table().get(                  # 5. coupled two-qubit block
+        (1 if j in cur[i] else 0, f[i], f[j],
+         has_others(i, j), has_others(j, i)))
     if res is None:                              # constraint unmet — defensive
-        return _apply_cz_tableau(cur, n, i, j, mats)
-    zeta2, ma2, mb2 = res
+        return _apply_cz_tableau(cur, n, i, j, f)
+    zeta2, ca2, cb2 = res
     set_edge(cur, i, j, zeta2)
-    mats[i], mats[j] = ma2, mb2
-    return cur, mats
+    f[i], f[j] = ca2, cb2
+    return cur, f
 
 
 def apply_controlled(adj: list[set[int]], n: int, i: int, j: int, gate: str,
-                     local_unitaries: list | None = None
-                     ) -> tuple[list[set[int]], list[list[float]]]:
+                     frame: list | None = None
+                     ) -> tuple[list[set[int]], list[int]]:
     """Apply a controlled gate between qubits i, j by conjugating CZ on the
     target j: gate = W_j · CZ_ij · W_j†.
       CZ : W = I
       CX : W = H        (CX = H CZ H, since H Z H = X)
       CY : W = SH       (CY = SH·CZ·(SH)†, since SH·Z·(SH)† = S X S† = Y)
-    Returns (new_adj, new_local_unitaries)."""
+    Returns (new_adj, new_frame)."""
     gate = (gate or "cz").lower()
+    # W and W† as words for frames.left_compose (leftmost applied last).
     if gate == "cx":
-        W, Wd = _H_U8, _H_U8
+        W, Wdag = ("H",), ("H",)
     elif gate == "cy":
-        W = _mat2x2_mul(_S_U8, _H_U8); Wd = _dag_u8(W)
-    else:                                            # cz
-        W = Wd = None
-    mats = _parse_mats(n, local_unitaries)
+        W, Wdag = ("H", "S"), ("SDG", "H")       # SH and its dagger H·S†
+    else:                                        # cz
+        W = Wdag = ()
+    f = parse_frame(n, frame)
     if not (0 <= i < n and 0 <= j < n and i != j):
-        return copy_adj(adj), mats
-    if W is not None:
-        mats[j] = _mat2x2_mul(Wd, mats[j])           # W†_j  on |ψ⟩
-    new_adj, new_lu = apply_cz(adj, n, i, j, mats)   # CZ_ij
-    if W is not None:
-        new_lu[j] = _mat2x2_mul(W, new_lu[j])        # W_j   on the result
-    return new_adj, new_lu
-
+        return copy_adj(adj), f
+    if Wdag:
+        f[j] = left_compose(f[j], *Wdag)         # W†_j  on |ψ⟩
+    new_adj, new_f = apply_cz(adj, n, i, j, f)   # CZ_ij
+    if W:
+        new_f[j] = left_compose(new_f[j], *W)    # W_j   on the result
+    return new_adj, new_f

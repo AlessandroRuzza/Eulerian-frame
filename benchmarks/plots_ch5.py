@@ -7,17 +7,19 @@ Every number here is measured by the scripts next to this one:
   canon_rgs.py       -> canon_rgs                      (2026-08-30, 5 reps)
   the drift check of subsec:bench-canon -> delta_degree (2026-08-30, 40 reps)
 
-Run from the repository root:
-    .env/bin/python3 graph_states/benchmarks/plots_ch5.py
+Run from anywhere:
+    .env/bin/python3 benchmarks/plots_ch5.py [--out DIR]
 """
-import math
+import argparse
 from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-OUT = Path("graph_states/paper/figures/graphStates")
+# Default: the thesis figure directory next to this checkout
+# (<repo>/Eulerian-frame/paper/figures/graphStates), overridable with --out.
+OUT = Path(__file__).resolve().parents[2] / "paper" / "figures" / "graphStates"
 VCOL = "#37474F"   # thesis Vcol, structure
 ACC  = "#B8860B"   # thesis Acc, highlight
 THIRD = "#7B1E3A"  # third and fourth series (RGS families)
@@ -55,8 +57,11 @@ def scaling_n():
     ax.set_xlabel("number of qubits $n$")
     ax.set_ylabel(r"time per operation ($\mu$s)")
     ax.set_ylim(0, 30)
-    ax.set_xticks(n[::2] + [3200])
-    ax.get_xaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
+    ax.xaxis.set_major_locator(matplotlib.ticker.LogLocator(base=10.0))
+    ax.xaxis.set_major_formatter(matplotlib.ticker.LogFormatterSciNotation(base=10.0))
+    ax.xaxis.set_minor_locator(
+        matplotlib.ticker.LogLocator(base=10.0, subs=tuple(np.arange(2, 10) * 0.1), numticks=100))
+    ax.xaxis.set_minor_formatter(matplotlib.ticker.NullFormatter())
     ax.legend(loc="upper left")
     save(fig, "scaling_n")
 
@@ -151,6 +156,12 @@ def canon_rgs():
 
 
 if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    ap.add_argument("--out", type=Path, default=OUT,
+                    help="directory for the PDFs (default: the thesis figure "
+                         "directory next to this checkout)")
+    OUT = ap.parse_args().out
+    OUT.mkdir(parents=True, exist_ok=True)
     scaling_n()
     scaling_degree()
     delta_degree()

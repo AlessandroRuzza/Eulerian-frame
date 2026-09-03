@@ -1,28 +1,33 @@
-"""Dense state-vector expansion of |G,w> = (tensor_i L_i)|G> for display.
+"""Dense state-vector expansion of |G,L> = (tensor_i L_i)|G> for display.
+
+The only place the simulator needs real 2x2 matrices rather than frame codes:
+amplitudes are complex numbers, so each frame letter is materialised through
+``frames.PAIR_TO_MAT`` before the sweep.  This is a display path, capped at
+MAX_SV_QUBITS qubits, so the conversion never shows up in the compute cost.
 
 The graph enters only through its edge list (adjacency sets), so the phase
 sweep costs O(2^n * m) rather than O(2^n * n^2)."""
 from __future__ import annotations
 
-from .cliffords import _mat2x2_mul, _parse_mats
+from .cliffords import _mat2x2_mul
+from .frames import PAIR_TO_MAT, parse_frame
 
 MAX_SV_QUBITS = 10  # state-vector display cut-off
 
 def compute_state_vector(
     adj: list[set[int]], n: int,
-    local_unitaries: list[list[float]] | None = None,
+    frame: list[int] | None = None,
     display_basis: list[str] | None = None,
 ) -> list[dict] | None:
-    """State vector of |G,w⟩ = (⊗_i L_i)|G⟩.
-    local_unitaries: list of n 8-float arrays [re00,im00,re01,im01,re10,im10,re11,im11].
-    Identity (all-X Eulerian vector) is assumed when None or absent for a qubit.
+    """State vector of |G,L⟩ = (⊗_i L_i)|G⟩.
+    frame: one Eulerian code per qubit (identity frame assumed when None).
     display_basis: per-qubit 'X'/'Y'/'Z' — basis in which amplitudes are expressed.
     'Z' (computational) assumed when None. Bit 0/1 of qubit q then means
     |0⟩/|1⟩ (Z), |+⟩/|-⟩ (X) or |+i⟩/|-i⟩ (Y)."""
     if n == 0 or n > MAX_SV_QUBITS:
         return None
 
-    mats = _parse_mats(n, local_unitaries)
+    mats = [list(PAIR_TO_MAT[c]) for c in parse_frame(n, frame)]
     # Coefficients in basis B are ⟨b_k|ψ⟩, i.e. apply B† to ψ.
     # X: B = H (self-adjoint).  Y: B = SH → B† = H·S†.
     _S2 = 0.5 ** 0.5

@@ -2,9 +2,9 @@
 
 Measured 2026-08-28, CPython 3.12 single-threaded, x86-64.
 Scripts (run from the repository root with `.env/bin/python3`):
-`graph_states/benchmarks/canon_scaling.py` (section 1),
-`graph_states/benchmarks/canon_degree_dynamics.py --traj --attractor --threshold`
-(sections 2 and 3), `graph_states/benchmarks/canon_rgs.py` (section 4).
+`benchmarks/canon_scaling.py` (section 1),
+`benchmarks/canon_degree_dynamics.py --traj --attractor --threshold`
+(sections 2 and 3), `benchmarks/canon_rgs.py` (section 4).
 Not thesis text — working notes.
 
 ## The claim under test

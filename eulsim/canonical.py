@@ -12,43 +12,27 @@ independent cross-check (tests/test_canonical_frame.py).
 """
 from __future__ import annotations
 
-from .cliffords import (
-    _H_U8,
-    _IDENTITY_U8,
-    _S_U8,
-    _Z_U8,
-    _dag_u8,
-    _mat2x2_mul,
-    _parse_mats,
-)
-from .framecanon import canonical_frame, u8_to_frame
+from .frames import DAG, fds_to_pair, parse_frame
+from .framecanon import canonical_frame
 from .tableau import _stab_mul, _tableau_from_state
 
 
 def _emit(n: int, new_adj_sets, f: list[int], d: list[int], s: list[int]):
-    """Shared tail of both routes: graph (adjacency sets), frame matrices,
+    """Shared tail of both routes: graph (adjacency sets), frame codes,
     corrections, info."""
     new_adj = [set(x) for x in new_adj_sets]
-    new_lu = []
-    for q in range(n):                       # L_q = H^{f_q} · S^{d_q} · Z^{s_q}
-        m = list(_Z_U8) if s[q] else list(_IDENTITY_U8)
-        if d[q]:
-            m = _mat2x2_mul(_S_U8, m)
-        if f[q]:
-            m = _mat2x2_mul(_H_U8, m)
-        new_lu.append(m)
+    new_frame = [fds_to_pair(f[q], d[q], s[q]) for q in range(n)]
     trivial = not (any(f) or any(d) or any(s))
     info = {"status": "trivial" if trivial else "framed",
             "hadamards": sum(f),
             "f": [q for q in range(n) if f[q]],
             "d": [q for q in range(n) if d[q]],
             "s": [q for q in range(n) if s[q]]}
-    return new_adj, new_lu, [_dag_u8(m) for m in new_lu], info
+    return new_adj, new_frame, [DAG[c] for c in new_frame], info
 
 
-def canonicalize(adj: list[set[int]], n: int,
-                 local_unitaries: list | None = None
-                 ) -> tuple[list[set[int]], list[list[float]], list[list[float]], dict]:
+def canonicalize(adj: list[set[int]], n: int, frame: list | None = None
+                 ) -> tuple[list[set[int]], list[int], list[int], dict]:
     """Canonical frame of the framed state (G, L), by re-framing only.
 
     Rewrites (graph, frame) as the *unique* description of the same physical
@@ -64,21 +48,19 @@ def canonicalize(adj: list[set[int]], n: int,
     transport the survivors down with pivots (see framecanon).  Two framed
     states describe the same state iff their canonical frames coincide.
 
-    Returns (new_adj, new_local_unitaries, corrections, info); applying
+    Returns (new_adj, new_frame, corrections, info); applying
     corrections[v] = L'_v† per qubit collapses the residual frame to the pure
     graph state |G'> (changing the physical state);
     info = {status in {trivial, framed}, hadamards = |F|, f, d, s}."""
     if n == 0:
         return [], [], [], {"status": "trivial", "hadamards": 0,
                             "f": [], "d": [], "s": []}
-    mats = _parse_mats(n, local_unitaries)
-    r = canonical_frame(adj, [u8_to_frame(m) for m in mats])
+    r = canonical_frame(adj, parse_frame(n, frame))
     return _emit(n, r["adj"], r["f"], r["d"], r["s"])
 
 
-def canonicalize_rref(adj: list[set[int]], n: int,
-                      local_unitaries: list | None = None
-                      ) -> tuple[list[set[int]], list[list[float]], list[list[float]], dict]:
+def canonicalize_rref(adj: list[set[int]], n: int, frame: list | None = None
+                      ) -> tuple[list[set[int]], list[int], list[int], dict]:
     """The same canonical frame by Gaussian elimination on the check matrix.
 
     The Hadamard support is read off as the Z-block pivot set of the reduced
@@ -90,8 +72,7 @@ def canonicalize_rref(adj: list[set[int]], n: int,
     if n == 0:
         return [], [], [], {"status": "trivial", "hadamards": 0,
                             "f": [], "d": [], "s": []}
-    mats = _parse_mats(n, local_unitaries)
-    tab = _tableau_from_state(adj, n, mats)
+    tab = _tableau_from_state(adj, n, parse_frame(n, frame))
 
     def xbit(g, q): return g[1][q] in ("X", "Y")
     def zbit(g, q): return g[1][q] in ("Z", "Y")

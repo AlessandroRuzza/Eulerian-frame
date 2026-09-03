@@ -9,9 +9,9 @@ the graph as well (thm:gcf); it is the trivial frame exactly on graph states
 
 This module computes it the way the thesis prescribes: on the frame itself,
 with re-framings R_v and the pivot P_{u,v} = R_v R_u^-1 R_v (prop:pivot), never
-building a check matrix.  Everything is exact integer/sign arithmetic on the
-vertex basis (w^C_v, w^N_v) = (L_v X L_v†, L_v Z L_v†) (prop:dictionary), which
-is all the algorithm ever reads.
+building a check matrix.  Everything is exact integer arithmetic on the vertex
+basis (w^C_v, w^N_v) = (L_v X L_v†, L_v Z L_v†) (prop:dictionary), which is all
+the algorithm ever reads — see ``frames`` for the encoding.
 
 Primitives (both state-preserving, both O(deg)):
 
@@ -45,145 +45,51 @@ is the check-matrix route kept as a cross-check (tests/test_canonical_frame.py).
 """
 from __future__ import annotations
 
-from .cliffords import (
-    _H_U8,
-    _IDENTITY_U8,
-    _S_U8,
-    _clifford_key,
-    _conj_pauli,
-    _mat2x2_mul,
-)
+from .frames import FDS, RV_CENTER, RV_NEIGH, XFOLD, ZFOLD, is_hadamard
+from .graph_ops import lc_inplace
 
-# ── Exact single-qubit Clifford arithmetic on the vertex basis ────────────────
-# A frame letter is its vertex basis L = (w^C, w^N); a signed Pauli is
-# (sign in {+1,-1}, letter in "XYZ").
+# Axis codes within a signed Pauli (see frames): X=0, Y=1, Z=2; +3 negates.
+_X, _Y, _Z = 0, 1, 2
 
-_MUL = {  # P Q = i^k R
-    ("X", "X"): (0, "I"), ("X", "Y"): (1, "Z"), ("X", "Z"): (3, "Y"),
-    ("Y", "X"): (3, "Z"), ("Y", "Y"): (0, "I"), ("Y", "Z"): (1, "X"),
-    ("Z", "X"): (1, "Y"), ("Z", "Y"): (3, "X"), ("Z", "Z"): (0, "I"),
-}
-
-P, M = 1, -1
-ID = ((P, "X"), (P, "Z"))                     # identity frame
-_U_W = ((P, "X"), (P, "Y"))                   # HS†H, right-composed at the centre of R_v
-_U_S = ((P, "Y"), (P, "Z"))                   # S,    right-composed at u in N(v)
-_U_X = ((P, "X"), (M, "Z"))                   # X,    right-composed at the centre of R_v^2
-_U_Z = ((M, "X"), (P, "Z"))                   # Z,    right-composed at u in N(v)
-
-# (f, d, s) of L_v = H^f S^d Z^s for the eight restricted letters (tab:restricted).
-_FDS = {
-    ((P, "X"), (P, "Z")): (0, 0, 0),          # I
-    ((M, "X"), (P, "Z")): (0, 0, 1),          # Z
-    ((P, "Y"), (P, "Z")): (0, 1, 0),          # S
-    ((M, "Y"), (P, "Z")): (0, 1, 1),          # SZ
-    ((P, "Z"), (P, "X")): (1, 0, 0),          # H
-    ((M, "Z"), (P, "X")): (1, 0, 1),          # HZ
-    ((M, "Y"), (P, "X")): (1, 1, 0),          # HS
-    ((P, "Y"), (P, "X")): (1, 1, 1),          # HSZ
-}
-
-
-def _third(c: tuple, n: tuple) -> tuple:
-    """i·c·n for anticommuting signed Paulis c, n (= L Y L† when c = w^C, n = w^N)."""
-    k, r = _MUL[(c[1], n[1])]
-    if r == "I":
-        raise ValueError("w^C and w^N must lie on distinct axes")
-    return (c[0] * n[0] * (-1 if k == 1 else 1), r)
-
-
-def _img(L: tuple, p: str) -> tuple:
-    """L p L† for p in "XYZ", given L = (w^C, w^N)."""
-    c, n = L
-    return c if p == "X" else (n if p == "Z" else _third(c, n))
-
-
-def _rmul(L: tuple, U: tuple) -> tuple:
-    """Right composition L -> L·U, with U given as (U X U†, U Z U†)."""
-    ux, uz = U
-    ix, iz = _img(L, ux[1]), _img(L, uz[1])
-    return ((ux[0] * ix[0], ix[1]), (uz[0] * iz[0], iz[1]))
-
-
-def _u8_table() -> dict:
-    """(w^C, w^N) -> 8-float matrix, the bridge to the rest of eulsim."""
-    seen = {_clifford_key(_IDENTITY_U8): _IDENTITY_U8}
-    frontier = [_IDENTITY_U8]
-    while frontier:
-        nxt = []
-        for m in frontier:
-            for g in (_H_U8, _S_U8):
-                m2 = _mat2x2_mul(m, g)
-                k = _clifford_key(m2)
-                if k not in seen:
-                    seen[k] = m2
-                    nxt.append(m2)
-        frontier = nxt
-    out = {(_conj_pauli(m, "X"), _conj_pauli(m, "Z")): m for m in seen.values()}
-    if len(out) != 24:
-        raise RuntimeError(f"Clifford table has {len(out)} entries, expected 24")
-    return out
-
-
-_U8 = _u8_table()
-
-
-def frame_to_u8(L: tuple) -> list:
-    """Vertex basis (w^C, w^N) -> 8-float matrix."""
-    return _U8[L]
-
-
-def u8_to_frame(m: list) -> tuple:
-    """8-float matrix -> vertex basis (w^C, w^N)."""
-    return (_conj_pauli(m, "X"), _conj_pauli(m, "Z"))
-
-
-# ── The framed state and its two moves ────────────────────────────────────────
 
 class FramedState:
-    """(G, L) with G as adjacency sets and L as exact vertex bases."""
+    """(G, L) with G as adjacency sets and L as Eulerian frame codes."""
 
-    def __init__(self, adj: list[set], frame: list[tuple]):
+    def __init__(self, adj: list[set], frame: list[int]):
         self.adj = [set(s) for s in adj]
-        self.L = list(frame)
+        self.f = list(frame)
         self.n = len(adj)
         # The Hadamard support is maintained incrementally: w^N moves only at
         # the centre of a move, so membership changes one vertex at a time.
-        self.F: set = {v for v in range(self.n) if self.L[v][1] == (P, "X")}
+        self.F: set = {v for v in range(self.n) if is_hadamard(self.f[v])}
 
     def reframe(self, v: int) -> None:
         """R_v: local complementation at v, frame updated so |psi> is unchanged."""
-        nb = sorted(self.adj[v])
-        for i, u in enumerate(nb):
-            for w in nb[i + 1:]:
-                if w in self.adj[u]:
-                    self.adj[u].discard(w)
-                    self.adj[w].discard(u)
-                else:
-                    self.adj[u].add(w)
-                    self.adj[w].add(u)
-        self.L[v] = _rmul(self.L[v], _U_W)
+        f = self.f
+        f[v] = RV_CENTER[f[v]]
         self._sync(v)
-        for u in nb:
-            self.L[u] = _rmul(self.L[u], _U_S)
+        for u in self.adj[v]:
+            f[u] = RV_NEIGH[f[u]]
+        lc_inplace(self.adj, v)
 
     def fold(self, v: int) -> None:
         """R_v^2 (prop:rv-square): absorb K_v into the frame, graph unchanged."""
-        self.L[v] = _rmul(self.L[v], _U_X)
+        f = self.f
+        f[v] = XFOLD[f[v]]
         self._sync(v)
         for u in self.adj[v]:
-            self.L[u] = _rmul(self.L[u], _U_Z)
+            f[u] = ZFOLD[f[u]]
 
     def _sync(self, v: int) -> None:
         self.F.discard(v)
-        if self.L[v][1] == (P, "X"):
+        if is_hadamard(self.f[v]):
             self.F.add(v)
 
-    def wC(self, v): return self.L[v][0]
-    def wN(self, v): return self.L[v][1]
+    def wC(self, v: int) -> int:
+        return self.f[v] // 6
 
-    def restricted(self) -> bool:
-        return all(self.L[v][1] in ((P, "Z"), (P, "X")) for v in range(self.n))
+    def wN(self, v: int) -> int:
+        return self.f[v] % 6
 
 
 # ── Phases ────────────────────────────────────────────────────────────────────
@@ -197,11 +103,11 @@ def _restrict_vertex(st: FramedState, v: int) -> None:
     of phase 1.  w^C_v is invariant under R_v, so the outcome is decided before
     the first step.  A wrong sign costs one fold (prop:rv-square), not a pivot.
     """
-    target = "X" if st.wC(v)[1] == "Z" else "Z"
+    target = _X if st.wC(v) % 3 == _Z else _Z
     for _ in range(4):
-        s, p = st.wN(v)
-        if p == target:
-            if s == M:
+        wn = st.wN(v)
+        if wn % 3 == target:
+            if wn >= 3:                       # wrong sign: one fold fixes it
                 st.fold(v)
             return
         st.reframe(v)
@@ -215,11 +121,11 @@ def _drop_free(st: FramedState) -> None:
     |F| decreases monotonically; dropping v flips w^C at its neighbours, which
     can free them in turn, hence the loop."""
     while True:
-        free = [v for v in sorted(st.F) if st.wC(v)[1] == "Y"]
+        free = [v for v in sorted(st.F) if st.wC(v) % 3 == _Y]
         if not free:
             return
         for v in free:
-            if st.wN(v) == (P, "X") and st.wC(v)[1] == "Y":
+            if is_hadamard(st.f[v]) and st.wC(v) % 3 == _Y:
                 _restrict_vertex(st, v)
 
 
@@ -255,15 +161,15 @@ def _slide_down(st: FramedState) -> None:
             return
         v, u = bad
         _pivot(st, u, v)
-        if not (st.wN(u) == (P, "X") and st.wN(v) == (P, "Z")):
+        if not (is_hadamard(st.f[u]) and st.wN(v) == _Z):
             raise RuntimeError(f"transport {v} -> {u} did not move the Hadamard")
     raise RuntimeError("Hadamard transport did not terminate")
 
 
-def canonical_frame(adj: list[set], frame: list[tuple]) -> dict:
+def canonical_frame(adj: list[set], frame: list[int]) -> dict:
     """Canonical frame of the framed state (G, L), by re-framing only.
 
-    adj: adjacency sets; frame: vertex bases (w^C, w^N) per vertex.
+    adj: adjacency sets; frame: one Eulerian code per vertex.
     Returns {adj, frame, F, f, d, s, hadamards} with L_v = H^f_v S^d_v Z^s_v."""
     st = FramedState(adj, frame)
     n = st.n
@@ -278,9 +184,8 @@ def canonical_frame(adj: list[set], frame: list[tuple]) -> dict:
     if any(st.adj[u] & st.F for u in st.F):
         raise RuntimeError("transport recreated an edge inside the Hadamard support")
 
-    F = set(st.F)
     f, d, s = [0] * n, [0] * n, [0] * n
     for v in range(n):
-        f[v], d[v], s[v] = _FDS[st.L[v]]
-    return {"adj": st.adj, "frame": st.L, "F": F,
-            "f": f, "d": d, "s": s, "hadamards": len(F)}
+        f[v], d[v], s[v] = FDS[st.f[v]]
+    return {"adj": st.adj, "frame": st.f, "F": set(st.F),
+            "f": f, "d": d, "s": s, "hadamards": len(st.F)}

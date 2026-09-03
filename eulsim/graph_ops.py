@@ -8,20 +8,23 @@ The graph is an *adjacency set* list: adj[v] is the set N(v), so every
 primitive costs O(deg) or O(deg^2) rather than O(n) or O(n^2).  The vertex
 count n is passed alongside because vertices with no neighbours are still
 vertices (adj has one entry per vertex, so n == len(adj)).
+
+The frame is a list of Eulerian codes (see ``frames``): one small int per
+vertex, so every frame update below is a single list read.
 """
 from __future__ import annotations
 
-from .cliffords import (
-    _HSDGH_U8,
-    _HSH_U8,
-    _IDENTITY_U8,
-    _S_U8,
-    _SDG_U8,
-    _Z_U8,
-    _conj_pauli,
-    _dag_u8,
-    _mat2x2_mul,
-    _parse_mats,
+from .frames import (
+    AXES,
+    DAG,
+    ID_PAIR,
+    PEND_HSH,
+    PEND_SDG,
+    RV_CENTER,
+    RV_NEIGH,
+    ZFOLD,
+    image,
+    parse_frame,
 )
 
 # ─── adjacency-set helpers ────────────────────────────────────────────────────
@@ -63,26 +66,6 @@ def adj_from_edges(n: int, edges) -> list[set[int]]:
     return adj
 
 
-def adj_from_matrix(matrix, n: int) -> list[set[int]]:
-    """Adjacency sets from a dense 0/1 matrix (back-compatible input path)."""
-    adj: list[set[int]] = [set() for _ in range(n)]
-    for i in range(n):
-        row = matrix[i]
-        for j in range(n):
-            if i != j and (int(row[j]) & 1):
-                adj[i].add(j); adj[j].add(i)
-    return adj
-
-
-def to_matrix(adj: list[set[int]], n: int) -> list[list[int]]:
-    """Dense 0/1 matrix — for display and for tests only, never for compute."""
-    m = [[0] * n for _ in range(n)]
-    for i in range(n):
-        for j in adj[i]:
-            m[i][j] = 1
-    return m
-
-
 # ─── graph operations ─────────────────────────────────────────────────────────
 
 def local_complement(adj: list[set[int]], n: int, v: int
@@ -99,6 +82,36 @@ def local_complement(adj: list[set[int]], n: int, v: int
     return a, toggled
 
 
+def lc_inplace(adj: list[set[int]], v: int) -> None:
+    """τ_v in place, no allocation and no toggle list — the hot path."""
+    nb = sorted(adj[v])
+    for i, u in enumerate(nb):
+        au = adj[u]
+        for w in nb[i + 1:]:
+            if w in au:
+                au.discard(w); adj[w].discard(u)
+            else:
+                au.add(w); adj[w].add(u)
+
+
+def reframe_move(adj: list[set[int]], n: int, v: int, frame: list | None
+                 ) -> tuple[list[set[int]], list[list[int]], list[int]]:
+    """Re-framing move R_v: (G, L) ↦ (τ_v(G), L·U_v†), the state-preserving
+    representation rewrite of the Eulerian-vector calculus.
+    With U_v = (HSH)_v ⊗ (S†)_{N(v)} and U_v|G⟩ = |τ_v(G)⟩ (Van den Nest),
+    (⊗L)|G⟩ = (⊗ L·U_v†)·U_v|G⟩ = (⊗ L·U_v†)|τ_v(G)⟩, so per qubit
+    L_v ↦ L_v·(HS†H), L_u ↦ L_u·S for u ∈ N(v).
+    On the vertex bases: w^N_v ↦ i·w^C_v·w^N_v (only the centre's w^N moves)
+    and w^C_u ↦ i·w^C_u·w^N_u at the neighbours (their w^N fixed).
+    Returns (new_adj, toggled_index_pairs, new_frame)."""
+    f = parse_frame(n, frame)
+    f[v] = RV_CENTER[f[v]]
+    for j in adj[v]:
+        f[j] = RV_NEIGH[f[j]]
+    new_adj, toggled = local_complement(adj, n, v)
+    return new_adj, toggled, f
+
+
 def _delete_vertex(adj: list[set[int]], n: int, v: int
                    ) -> tuple[list[set[int]], list[int]]:
     kept = [i for i in range(n) if i != v]
@@ -107,9 +120,9 @@ def _delete_vertex(adj: list[set[int]], n: int, v: int
 
 
 def _finish_measure(
-    adj_full: list[set[int]], n: int, v: int, mats: list,
+    adj_full: list[set[int]], n: int, v: int, f: list[int],
     steps: list, delete: bool,
-) -> tuple[list[set[int]], list[int], list, list]:
+) -> tuple[list[set[int]], list[int], list, list[int]]:
     """Final disposition of the measured vertex.
     adj_full is the adjacency *after* any local complementations, before v
     is dealt with. If delete, v is removed (standard rule). Otherwise v is kept
@@ -119,30 +132,31 @@ def _finish_measure(
     are unchanged."""
     if delete:
         a, kept = _delete_vertex(adj_full, n, v)
-        return a, kept, steps, [mats[i] for i in kept]
+        return a, kept, steps, [f[i] for i in kept]
     a = copy_adj(adj_full)
     for u in a[v]:
         a[u].discard(v)
     a[v].clear()
-    out_mats = [m[:] for m in mats]
-    out_mats[v] = _IDENTITY_U8[:]
-    return a, list(range(n)), steps, out_mats
+    out = list(f)
+    out[v] = ID_PAIR
+    return a, list(range(n)), steps, out
 
 
 def do_measure(
     adj: list[set[int]], n: int, v: int, basis: str,
-    local_unitaries: list | None = None, delete: bool = True,
+    frame: list | None = None, delete: bool = True,
     invert: bool = False,
-) -> tuple[list[set[int]], list[int], list, list]:
+) -> tuple[list[set[int]], list[int], list, list[int]]:
     """Pauli measurement on vertex v via the *reduction chain*
     (notes-EulVec-Alternative-XMeasure): every case terminates in the single
     destructive primitive, Z-deletion.
 
-    Returns (new_adj, kept_original_indices, animation_steps, new_local_unitaries);
-    new_local_unitaries[i] corresponds to kept[i].
+    Returns (new_adj, kept_original_indices, animation_steps, new_frame);
+    new_frame[i] corresponds to kept[i].
 
     1. *Basis transport*: a lab measurement of P on qubit v equals measuring
-       Q = L_v† P L_v = σ·Q' on the underlying |G⟩, with σ ∈ {±1}, Q' ∈ {X,Y,Z}.
+       Q = L_v† P L_v on the underlying |G⟩ — one read of the vertex basis of
+       L_v† (a signed Pauli: sign σ ∈ {±1}, axis Q' ∈ {X,Y,Z}).
     2. *Reduction*: re-framing moves R_w rewrite the representative while the
        pending basis conjugates by the factor of U_w at v (Lemma "re-framing
        transport"):
@@ -163,60 +177,39 @@ def do_measure(
     graph-state rules; delete=False keeps it but resets it for reuse (see
     _finish_measure).
     """
-    mats = _parse_mats(n, local_unitaries)
+    f = parse_frame(n, frame)
     cur = copy_adj(adj)
     steps: list = []
 
-    # 1. Basis transport: L_v† P L_v = σ·Q on |G⟩.
-    P_lab = {"x": "X", "y": "Y", "z": "Z"}[basis]
-    sigma, Q = _conj_pauli(_dag_u8(mats[v]), P_lab)
+    # 1. Basis transport: L_v† P L_v, a signed Pauli code p = axis + 3·sign_bit.
+    p = image(DAG[f[v]], AXES.index({"x": "X", "y": "Y", "z": "Z"}[basis]))
 
     def _reframe(w: int) -> None:
-        """R_w on (cur, mats) + conjugation of the pending basis (σ·Q) by the
-        factor of U_w at v: HSH for v = w, S† for v ∈ N(w)."""
-        nonlocal cur, sigma, Q
-        fac = _HSH_U8 if v == w else (_SDG_U8 if v in cur[w] else None)
-        new_adj, tog, new_mats = reframe_move(cur, n, w, mats)
-        mats[:] = new_mats
+        """R_w on (cur, f) + conjugation of the pending basis by the factor of
+        U_w at v: HSH for v = w, S† for v ∈ N(w)."""
+        nonlocal cur, p
+        tab = PEND_HSH if v == w else (PEND_SDG if v in cur[w] else None)
+        f[w] = RV_CENTER[f[w]]
+        for u in cur[w]:
+            f[u] = RV_NEIGH[f[u]]
+        new_adj, tog = local_complement(cur, n, w)
         cur = new_adj
         steps.append({"op": "lc", "vertex": w, "pairs": tog})
-        if fac is not None:
-            s2, Q2 = _conj_pauli(fac, Q)
-            sigma, Q = sigma * s2, Q2
+        if tab is not None:
+            p = tab[p]
 
     # 2. Reduction chain: X → Y → Z.
-    if Q == "X":
+    if p % 3 == 0:                       # pending on the X axis
         if not cur[v]:                   # isolated: deterministic, nothing changes
-            return _finish_measure(cur, n, v, mats, steps, delete)
-        # free choice: minimise |N(b)|
-        b = min(cur[v], key=lambda j: (len(cur[j]), j))
-        _reframe(b)                                   # pending ±X → ∓Y on τ_b(G)
-    if Q == "Y":
-        _reframe(v)                                   # pending ±Y → ±Z on τ_v(…)
-    assert Q == "Z"
+            return _finish_measure(cur, n, v, f, steps, delete)
+        b = min(cur[v], key=lambda j: (len(cur[j]), j))   # free choice: min |N(b)|
+        _reframe(b)                                       # ±X → ∓Y on τ_b(G)
+    if p % 3 == 1:                       # pending on the Y axis
+        _reframe(v)                                       # ±Y → ±Z on τ_v(…)
+    assert p % 3 == 2, p
 
     # 3. Z-deletion. Eigenvalue of Z on the underlying graph state = σ·lab.
-    lab_outcome = -1 if invert else 1
-    if sigma * lab_outcome == -1:                     # correction: Z on N(v)
+    if (p // 3) ^ (1 if invert else 0):                    # correction: Z on N(v)
         for u in cur[v]:
-            mats[u] = _mat2x2_mul(mats[u], _Z_U8)
-    return _finish_measure(cur, n, v, mats, steps, delete)
-
-
-def reframe_move(adj: list[set[int]], n: int, v: int,
-                 local_unitaries: list | None
-                 ) -> tuple[list[set[int]], list[list[int]], list[list[float]]]:
-    """Re-framing move R_v: (G, L) ↦ (τ_v(G), L·U_v†), the state-preserving
-    representation rewrite of the Eulerian-vector calculus.
-    With U_v = (HSH)_v ⊗ (S†)_{N(v)} and U_v|G⟩ = |τ_v(G)⟩ (Van den Nest),
-    (⊗L)|G⟩ = (⊗ L·U_v†)·U_v|G⟩ = (⊗ L·U_v†)|τ_v(G)⟩, so per qubit
-    L_v ↦ L_v·(HS†H), L_u ↦ L_u·S for u ∈ N(v).
-    On the signed vectors: w^N_v ↦ i·w^C_v·w^N_v (center, w^C_v fixed) and
-    w^C_u ↦ i·w^C_u·w^N_u (neighbours, w^N_u fixed).
-    Returns (new_adj, toggled_index_pairs, new_local_unitaries)."""
-    mats = _parse_mats(n, local_unitaries)
-    mats[v] = _mat2x2_mul(mats[v], _HSDGH_U8)
-    for j in adj[v]:
-        mats[j] = _mat2x2_mul(mats[j], _S_U8)
-    new_adj, toggled = local_complement(adj, n, v)
-    return new_adj, toggled, mats
+            f[u] = ZFOLD[f[u]]
+    return _finish_measure(cur, n, v, f, steps, delete)

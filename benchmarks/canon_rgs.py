@@ -11,8 +11,8 @@ frame is unique (thm:gcf) and fixes the graph, so the post-canonicalization
 degree is a property of the state, not of the run: the spread across rows is
 the spread over the frames drawn, and is reported as a standard deviation.
 
-Run from the repository root:
-    .env/bin/python3 graph_states/benchmarks/canon_rgs.py [--reps 5]
+Run from anywhere:
+    .env/bin/python3 benchmarks/canon_rgs.py [--reps 5]
 """
 import argparse
 import gc
@@ -22,19 +22,13 @@ from pathlib import Path
 from random import Random
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-import bench_frames as B                                  # noqa: E402
 from eulsim.framecanon import canonical_frame             # noqa: E402
+from eulsim.frames import ID_PAIR, VALID_PAIRS            # noqa: E402
 
 REPS = 5               # random frames per row
 BUDGET = 30.0          # seconds for one canonicalization
 ARMS = (5, 10, 15, 20)
 HOPS = (4, 16, 64, 256)
-
-
-def cp(c):
-    """bench int code 6*w^C + w^N -> ((sign, letter), (sign, letter))"""
-    return tuple((1 if p < 3 else -1, "XYZ"[p % 3]) for p in (c // 6, c % 6))
 
 
 def rgs_chain(hops, m):
@@ -89,12 +83,12 @@ def main(reps=REPS, arms=ARMS, hops_list=HOPS, budget=BUDGET):
               f"{'max deg':>9}{'|F|':>7}")
         for hops in hops_list:
             adj = rgs_chain(hops, m); n = len(adj)
-            triv = [cp(2)] * n                         # (w^C,w^N)=(+X,+Z): identity
+            triv = [ID_PAIR] * n                       # (w^C,w^N)=(+X,+Z): identity
             t_triv = sum(timeit(adj, triv)[0] for _ in range(reps)) / reps
             ts, degs, maxs, fs, over = [], [], [], [], False
             for rep in range(reps):
                 rng = Random(f"rgs-{m}-{hops}-{rep}")   # str seed: stable across runs
-                frame = [cp(rng.choice(B.VALID_PAIRS)) for _ in range(n)]
+                frame = [rng.choice(VALID_PAIRS) for _ in range(n)]
                 dt, r = timeit(adj, frame)
                 ts.append(dt); degs.append(mean_deg(r["adj"]))
                 maxs.append(max_deg(r["adj"])); fs.append(r["hadamards"])

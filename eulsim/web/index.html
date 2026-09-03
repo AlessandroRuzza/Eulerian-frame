@@ -355,8 +355,11 @@
       <h1>EulSim &mdash; Eulerian Frame Simulator</h1>
       <p>
         Each vertex is a qubit initialised to |+&rang;. Each edge applies a CZ gate. <br>
-        Click empty space to add a qubit &bull; click two qubits to toggle an edge &bull; drag to reposition.
+        Click empty space to add a qubit <br> 
+        Click two qubits to apply CZ <br> 
+        Drag boxes to reposition.
       </p>
+      <button class="cmp-toggle small" id="shareQRBtn" onclick="showShareQR()" title="QR code for this simulator's address, for opening it on another device">&#9638; Share QR</button>
     </div>
     <div class="hero-actions">
       <button class="cmp-toggle small" id="compareModeBtn" onclick="toggleCompare()">&#8660; Compare Mode</button>
@@ -365,7 +368,6 @@
       <button class="cmp-toggle small" id="wHeadBtn" onclick="toggleWHeaders()" style="display:none">w<sup>N</sup>/w<sup>C</sup> headers: on</button>
       <button class="cmp-toggle small" id="dualBasisBtn" onclick="toggleDualBasis()">Showing: vertex basis</button>
       <button class="cmp-toggle small" id="resetLayoutBtn" onclick="resetLayout()">&#8635; Reset Layout</button>
-      <button class="cmp-toggle small" id="shareQRBtn" onclick="showShareQR()" title="QR code for this simulator's address, for opening it on another device">&#9638; Share QR</button>
     </div>
   </section>
 

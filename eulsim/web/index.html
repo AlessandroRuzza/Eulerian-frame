@@ -823,7 +823,7 @@ function basisColors(b){
 // Same graph drawing, but vertices are drawn uncoloured (a single neutral disc)
 // and each one carries its signed vertex basis "(w^N, w^C)" as text above it,
 // e.g. "(Z, X)" or "(−Y, Z)"; wHeaders adds a small w^N / w^C above the letters.
-let labelMode = false;
+let labelMode = true;   // default view: frame as text, vertices uncoloured
 let wHeaders  = true;
 // Vertex basis (L Z L†, L X L†) vs its dual (L† Z L, L† X L). Purely a display
 // choice: the state is untouched, only which conjugation the letters report.
@@ -3177,6 +3177,7 @@ function exportPNG(side) {
 }
 
 // ─── init ─────────────────────────────────────────────────────────────────────
+_syncViewMode();            // buttons + legends follow the default view mode
 graphA._ensureEvents();
 graphA.draw();
 graphA.fetchCompute();

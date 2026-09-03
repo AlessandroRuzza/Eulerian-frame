@@ -11,5 +11,10 @@ Equivalent invocation:  python3 -m eulsim [--port 8001]
 """
 from eulsim.cli import main
 
+#   "public" - the hosted deployment (eulsim.cli.PUBLIC_URL), reachable by anyone;
+#   "local"  - this machine's LAN address, for devices on the same network only.
+# --share on the command line overrides this for a single run.
+SHARE_TARGET = "public"
+
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(default_share=SHARE_TARGET))

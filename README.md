@@ -36,6 +36,11 @@ Then open `http://127.0.0.1:8001/`. `--host` defaults to `0.0.0.0`, so the
 startup banner also prints a LAN URL you can open from another machine.
 `health_check.sh [port]` pings `/health` and tells you whether a server is up.
 
+The **▦ Share QR** button opens a QR code for the address the banner prints as
+`QR:`, with a **↓ PNG** button next to it. `--share public` (the launcher
+default, set by `SHARE_TARGET` in `run_eulsim.py`) encodes the hosted
+deployment; `--share local` encodes this server's own LAN address instead.
+
 ## What the app does
 
 Two independent graph editors, A and B, sit side by side; the comparison

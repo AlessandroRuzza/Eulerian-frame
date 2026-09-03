@@ -295,6 +295,14 @@
     .modal-row { display:flex; align-items:center; gap:10px; }
     .modal-row .modal-range { flex:1; accent-color:var(--accent); }
     .modal-row .modal-input { width:86px; flex:none; text-align:right; }
+    /* Share-QR popup */
+    .qr-box { width:min(400px,92vw); text-align:center; }
+    .qr-holder { display:flex; justify-content:center; }
+    .qr-holder svg { max-width:100%; height:auto; border-radius:8px; border:1px solid #e2e8f2; }
+    .qr-url {
+      margin:10px 0 0; font-family:"IBM Plex Mono",monospace; font-size:.78rem;
+      color:var(--muted); word-break:break-all;
+    }
 
     /* Legend */
     .legend { display:flex; flex-wrap:wrap; gap:6px 10px; font-size:.78rem; color:#354254; margin-top:8px; }
@@ -346,7 +354,7 @@
     <div class="hero-text">
       <h1>EulSim &mdash; Eulerian Frame Simulator</h1>
       <p>
-        Each vertex is a qubit initialised to |+&rang;. Each edge applies a CZ gate.
+        Each vertex is a qubit initialised to |+&rang;. Each edge applies a CZ gate. <br>
         Click empty space to add a qubit &bull; click two qubits to toggle an edge &bull; drag to reposition.
       </p>
     </div>
@@ -357,6 +365,7 @@
       <button class="cmp-toggle small" id="wHeadBtn" onclick="toggleWHeaders()" style="display:none">w<sup>N</sup>/w<sup>C</sup> headers: on</button>
       <button class="cmp-toggle small" id="dualBasisBtn" onclick="toggleDualBasis()">Showing: vertex basis</button>
       <button class="cmp-toggle small" id="resetLayoutBtn" onclick="resetLayout()">&#8635; Reset Layout</button>
+      <button class="cmp-toggle small" id="shareQRBtn" onclick="showShareQR()" title="QR code for this simulator's address, for opening it on another device">&#9638; Share QR</button>
     </div>
   </section>
 
@@ -3174,6 +3183,372 @@ function exportPNG(side) {
   };
   img.onerror = () => toast('PNG export failed');
   img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+}
+
+// ─── QR code (byte mode, ECC level M, versions 1-10) ─────────────────────────
+// Self-contained encoder: no external library, so the page still works on a
+// machine with no internet. qrMatrix(text) returns a square array of 0/1 rows.
+const _QR_BLOCKS = {            // version: [EC codewords/block, [blocks, data cw]…]
+  1:  [10, [[1, 16]]],
+  2:  [16, [[1, 28]]],
+  3:  [26, [[1, 44]]],
+  4:  [18, [[2, 32]]],
+  5:  [24, [[2, 43]]],
+  6:  [16, [[4, 27]]],
+  7:  [18, [[4, 31]]],
+  8:  [22, [[2, 38], [2, 39]]],
+  9:  [22, [[3, 36], [2, 37]]],
+  10: [26, [[4, 43], [1, 44]]],
+};
+const _QR_ALIGN = {
+  1: [], 2: [6,18], 3: [6,22], 4: [6,26], 5: [6,30],
+  6: [6,34], 7: [6,22,38], 8: [6,24,42], 9: [6,26,46], 10: [6,28,50],
+};
+
+// GF(256) with primitive polynomial x^8+x^4+x^3+x^2+1 (0x11d).
+const _GF_EXP = new Uint8Array(512), _GF_LOG = new Uint8Array(256);
+(() => {
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    _GF_EXP[i] = x; _GF_LOG[x] = i;
+    x <<= 1; if (x & 0x100) x ^= 0x11d;
+  }
+  for (let i = 255; i < 512; i++) _GF_EXP[i] = _GF_EXP[i - 255];
+})();
+function _gfMul(a, b) { return (a && b) ? _GF_EXP[_GF_LOG[a] + _GF_LOG[b]] : 0; }
+
+// Reed-Solomon check codewords of `data` for a generator of degree `n`.
+function _rsEcc(data, n) {
+  let gen = [1];
+  for (let i = 0; i < n; i++) {                       // ∏ (x - α^i)
+    const next = new Array(gen.length + 1).fill(0);
+    for (let j = 0; j < gen.length; j++) {
+      next[j]     ^= gen[j];                          // gen is descending: gen[0] = 1
+      next[j + 1] ^= _gfMul(gen[j], _GF_EXP[i]);
+    }
+    gen = next;
+  }
+  const rem = new Array(n).fill(0);
+  for (const d of data) {
+    const factor = d ^ rem[0];
+    rem.shift(); rem.push(0);
+    if (factor) for (let j = 0; j < n; j++) rem[j] ^= _gfMul(gen[j + 1], factor);
+  }
+  return rem;
+}
+
+function _qrDataCodewords(version) {
+  const [, groups] = _QR_BLOCKS[version];
+  return groups.reduce((s, [nb, cw]) => s + nb * cw, 0);
+}
+
+// Smallest version whose byte-mode capacity holds `n` bytes at ECC M.
+function _qrVersion(n) {
+  for (let v = 1; v <= 10; v++) {
+    const bits = 8 * _qrDataCodewords(v) - 4 - (v < 10 ? 8 : 16);
+    if (n <= bits >> 3) return v;
+  }
+  return null;
+}
+
+// Mode + length header, payload, terminator, 0xEC/0x11 padding.
+function _qrPayload(bytes, version) {
+  const total = _qrDataCodewords(version);
+  const bits  = [];
+  const push  = (val, len) => { for (let i = len - 1; i >= 0; i--) bits.push((val >> i) & 1); };
+  push(0b0100, 4);
+  push(bytes.length, version < 10 ? 8 : 16);
+  for (const b of bytes) push(b, 8);
+  for (let i = 0; i < 4 && bits.length < total * 8; i++) bits.push(0);
+  while (bits.length % 8) bits.push(0);
+  const out = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let b = 0;
+    for (let j = 0; j < 8; j++) b = (b << 1) | bits[i + j];
+    out.push(b);
+  }
+  for (let i = 0; out.length < total; i++) out.push(i % 2 ? 0x11 : 0xec);
+  return out;
+}
+
+// Split into blocks, append per-block ECC, interleave both halves.
+function _qrCodewords(bytes, version) {
+  const [ecLen, groups] = _QR_BLOCKS[version];
+  const payload = _qrPayload(bytes, version);
+  const dataBlocks = [], ecBlocks = [];
+  let at = 0;
+  for (const [nb, cw] of groups) {
+    for (let i = 0; i < nb; i++) {
+      const blk = payload.slice(at, at + cw); at += cw;
+      dataBlocks.push(blk);
+      ecBlocks.push(_rsEcc(blk, ecLen));
+    }
+  }
+  const out = [];
+  const maxData = Math.max(...dataBlocks.map(b => b.length));
+  for (let i = 0; i < maxData; i++) for (const b of dataBlocks) if (i < b.length) out.push(b[i]);
+  for (let i = 0; i < ecLen; i++)   for (const b of ecBlocks)   out.push(b[i]);
+  return out;
+}
+
+// BCH(15,5) format information, and BCH(18,6) version information.
+function _qrFormatBits(mask) {
+  let d = (0b00 << 3) | mask;                     // 00 = ECC level M
+  let v = d << 10;
+  for (let i = 4; i >= 0; i--) if (v & (1 << (i + 10))) v ^= 0x537 << i;
+  return ((d << 10) | v) ^ 0x5412;
+}
+function _qrVersionBits(version) {
+  let v = version << 12;
+  for (let i = 5; i >= 0; i--) if (v & (1 << (i + 12))) v ^= 0x1f25 << i;
+  return (version << 12) | v;
+}
+
+const _QR_MASKS = [
+  (r, c) => (r + c) % 2 === 0,
+  (r, c) => r % 2 === 0,
+  (r, c) => c % 3 === 0,
+  (r, c) => (r + c) % 3 === 0,
+  (r, c) => (((r / 2) | 0) + ((c / 3) | 0)) % 2 === 0,
+  (r, c) => ((r * c) % 2) + ((r * c) % 3) === 0,
+  (r, c) => ((((r * c) % 2) + ((r * c) % 3)) % 2) === 0,
+  (r, c) => ((((r + c) % 2) + ((r * c) % 3)) % 2) === 0,
+];
+
+// Function patterns: finders + separators, alignment, timing, dark module and
+// the reserved format/version areas. `res` marks every module data must skip.
+function _qrSkeleton(version) {
+  const n = 17 + 4 * version;
+  const m   = Array.from({length: n}, () => new Array(n).fill(0));
+  const res = Array.from({length: n}, () => new Array(n).fill(false));
+  const setF = (r, c, val) => { m[r][c] = val; res[r][c] = true; };
+
+  for (const [br, bc] of [[0, 0], [0, n - 7], [n - 7, 0]]) {
+    for (let r = -1; r <= 7; r++) for (let c = -1; c <= 7; c++) {
+      const rr = br + r, cc = bc + c;
+      if (rr < 0 || rr >= n || cc < 0 || cc >= n) continue;
+      const ring = (r === 0 || r === 6) && c >= 0 && c <= 6;
+      const side = (c === 0 || c === 6) && r >= 0 && r <= 6;
+      const core = r >= 2 && r <= 4 && c >= 2 && c <= 4;
+      setF(rr, cc, (ring || side || core) ? 1 : 0);
+    }
+  }
+  const centres = _QR_ALIGN[version];
+  for (const r0 of centres) for (const c0 of centres) {
+    if (res[r0][c0]) continue;                    // overlaps a finder pattern
+    for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++)
+      setF(r0 + r, c0 + c, (Math.max(Math.abs(r), Math.abs(c)) !== 1) ? 1 : 0);
+  }
+  for (let i = 8; i < n - 8; i++) { setF(6, i, i % 2 === 0 ? 1 : 0); setF(i, 6, i % 2 === 0 ? 1 : 0); }
+  setF(n - 8, 8, 1);                              // dark module
+  for (let i = 0; i < 9; i++) {                   // format info areas
+    if (!res[8][i]) res[8][i] = true;
+    if (!res[i][8]) res[i][8] = true;
+  }
+  for (let i = 0; i < 8; i++) { res[8][n - 1 - i] = true; res[n - 1 - i][8] = true; }
+  if (version >= 7) for (let i = 0; i < 6; i++) for (let j = 0; j < 3; j++) {
+    res[n - 11 + j][i] = true; res[i][n - 11 + j] = true;
+  }
+  return {n, m, res};
+}
+
+// Zigzag placement, right to left in column pairs, skipping the timing column.
+function _qrPlace(m, res, n, codewords) {
+  const bits = [];
+  for (const b of codewords) for (let i = 7; i >= 0; i--) bits.push((b >> i) & 1);
+  let at = 0, up = true;
+  for (let col = n - 1; col > 0; col -= 2) {
+    if (col === 6) col--;
+    for (let k = 0; k < n; k++) {
+      const row = up ? n - 1 - k : k;
+      for (const c of [col, col - 1]) {
+        if (res[row][c]) continue;
+        m[row][c] = at < bits.length ? bits[at++] : 0;   // remainder bits are 0
+      }
+    }
+    up = !up;
+  }
+}
+
+function _qrPenalty(m, n) {
+  let p = 0, dark = 0;
+  for (let i = 0; i < n; i++) {
+    for (const line of [m[i], m.map(r => r[i])]) {
+      let run = 1;
+      for (let j = 1; j < n; j++) {
+        if (line[j] === line[j - 1]) { run++; }
+        else { if (run >= 5) p += 3 + (run - 5); run = 1; }
+      }
+      if (run >= 5) p += 3 + (run - 5);
+      for (let j = 0; j + 10 < n; j++) {            // 1011101 0000 either way
+        const w = line.slice(j, j + 11).join('');
+        if (w === '10111010000' || w === '00001011101') p += 40;
+      }
+    }
+  }
+  for (let r = 0; r + 1 < n; r++) for (let c = 0; c + 1 < n; c++) {
+    const v = m[r][c];
+    if (v === m[r][c + 1] && v === m[r + 1][c] && v === m[r + 1][c + 1]) p += 3;
+  }
+  for (const row of m) for (const v of row) dark += v;
+  p += 10 * Math.floor(Math.abs(dark * 100 / (n * n) - 50) / 5);
+  return p;
+}
+
+function _qrApplyFormat(m, n, mask) {
+  const f = _qrFormatBits(mask);
+  const bit = i => (f >> i) & 1;
+  for (let i = 0; i <= 5; i++)      m[i][8] = bit(i);        // column 8, top down
+  m[7][8] = bit(6); m[8][8] = bit(7); m[8][7] = bit(8);
+  for (let i = 9; i <= 14; i++)     m[8][14 - i] = bit(i);    // row 8, right to left
+  for (let i = 0; i <= 7; i++)      m[8][n - 1 - i] = bit(i); // second copy: row 8, right
+  for (let i = 8; i <= 14; i++)     m[n - 15 + i][8] = bit(i);//   and column 8, bottom
+}
+
+// UTF-8 bytes of `text`, encoded at the smallest version that fits (null if
+// the text is too long for version 10 — far beyond any LAN URL).
+function qrMatrix(text) {
+  const bytes = typeof TextEncoder !== 'undefined'
+    ? Array.from(new TextEncoder().encode(text))
+    : Array.from(unescape(encodeURIComponent(text)), ch => ch.charCodeAt(0) & 0xff);
+  const version = _qrVersion(bytes.length);
+  if (!version) return null;
+
+  const codewords = _qrCodewords(bytes, version);
+  const {n, m, res} = _qrSkeleton(version);
+  _qrPlace(m, res, n, codewords);
+  if (version >= 7) {
+    const vb = _qrVersionBits(version);
+    for (let i = 0; i < 18; i++) {
+      const b = (vb >> i) & 1, r = (i / 3) | 0, c = i % 3;
+      m[r][n - 11 + c] = b; m[n - 11 + c][r] = b;
+    }
+  }
+  let best = null, bestScore = Infinity;
+  for (let mask = 0; mask < 8; mask++) {
+    const cand = m.map((row, r) => row.map((v, c) => res[r][c] ? v : v ^ (_QR_MASKS[mask](r, c) ? 1 : 0)));
+    _qrApplyFormat(cand, n, mask);
+    const score = _qrPenalty(cand, n);
+    if (score < bestScore) { bestScore = score; best = cand; }
+  }
+  return best;
+}
+
+// ─── Share QR ─────────────────────────────────────────────────────────────────
+// The address the server prints at startup (its LAN IP, so a phone on the same
+// network reaches it), substituted into the page when it is served. Opening
+// index.html directly leaves the placeholder, and the page falls back to
+// whatever address it was loaded from.
+const SHARE_URL_RAW = '__SHARE_URL__';
+function shareURL() {
+  return SHARE_URL_RAW.startsWith('http') ? SHARE_URL_RAW : window.location.href;
+}
+
+const QR_QUIET  = 4;    // quiet zone in modules — 4 is the standard minimum
+const QR_PX     = 7;    // on-screen module size
+const QR_PNG_PX = 16;   // module size in the exported PNG
+
+// Black square per dark module on a white ground, quiet zone included.
+function _qrSvgEl(m) {
+  const n = m.length, side = (n + 2 * QR_QUIET) * QR_PX;
+  const svg = el('svg', {
+    xmlns:'http://www.w3.org/2000/svg', width:side, height:side,
+    viewBox:`0 0 ${side} ${side}`, 'shape-rendering':'crispEdges',
+  });
+  svg.appendChild(el('rect', {x:0, y:0, width:side, height:side, fill:'#ffffff'}));
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) {
+    if (!m[r][c]) continue;
+    svg.appendChild(el('rect', {
+      x:(c + QR_QUIET) * QR_PX, y:(r + QR_QUIET) * QR_PX,
+      width:QR_PX, height:QR_PX, fill:'#0b1220',
+    }));
+  }
+  return svg;
+}
+
+function _qrCanvas(m, px) {
+  const n = m.length, side = (n + 2 * QR_QUIET) * px;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = side;
+  const ctx = cv.getContext('2d');
+  ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, side, side);
+  ctx.fillStyle = '#000000';
+  for (let r = 0; r < n; r++) for (let c = 0; c < n; c++)
+    if (m[r][c]) ctx.fillRect((c + QR_QUIET) * px, (r + QR_QUIET) * px, px, px);
+  return cv;
+}
+
+function _qrDownloadPNG(m) {
+  _qrCanvas(m, QR_PNG_PX).toBlob(blob => {
+    if (!blob) { toast('PNG export failed'); return; }
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    const name  = `eulsim-qr-${stamp}.png`;
+    const url   = URL.createObjectURL(blob);
+    const a     = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Saved ${name}`);
+  }, 'image/png');
+}
+
+// The clipboard API needs a secure context, which http://<LAN IP> is not, so
+// fall back to a hidden textarea and execCommand.
+function _copyLink(text) {
+  const ok   = () => toast('Link copied');
+  const fail = () => toast('Copy failed — select the link and copy it manually');
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(ok, () => _copyFallback(text, ok, fail));
+  } else {
+    _copyFallback(text, ok, fail);
+  }
+}
+function _copyFallback(text, ok, fail) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+  document.body.appendChild(ta);
+  ta.focus(); ta.select();
+  let done = false;
+  try { done = document.execCommand('copy'); } catch (_) { done = false; }
+  ta.remove();
+  done ? ok() : fail();
+}
+
+function showShareQR() {
+  const url = shareURL();
+  const m   = qrMatrix(url);
+  if (!m) { toast('Link too long to encode as a QR code'); return; }
+
+  // A bare IP or loopback address only resolves for devices on this network;
+  // the hosted deployment is reachable from anywhere.
+  const onLan = /^https?:\/\/(localhost|127\.0\.0\.1|\[|\d+\.\d+\.\d+\.\d+)/.test(url);
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    `<div class="modal-box qr-box">
+       <h3>Share QR</h3>
+       <p class="modal-sub">${onLan
+         ? 'Scan from a device on the same network to open this simulator.'
+         : 'Scan to open this simulator.'}</p>
+       <div class="qr-holder"></div>
+       <p class="qr-url">${escapeHtml(url)}</p>
+       <div class="modal-btns">
+         <button class="ghost small modal-reset qr-copy">Copy link</button>
+         <button class="ghost small qr-png" title="Download the QR code as a PNG">&#8595; PNG</button>
+         <button class="sec small qr-close">Close</button>
+       </div>
+     </div>`;
+  overlay.querySelector('.qr-holder').appendChild(_qrSvgEl(m));
+  document.body.appendChild(overlay);
+
+  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
+  const onKey = e => { if (e.key === 'Escape') { e.preventDefault(); close(); } };
+  overlay.querySelector('.qr-copy').onclick  = () => _copyLink(url);
+  overlay.querySelector('.qr-png').onclick   = () => _qrDownloadPNG(m);
+  overlay.querySelector('.qr-close').onclick = close;
+  overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', onKey);
 }
 
 // ─── init ─────────────────────────────────────────────────────────────────────

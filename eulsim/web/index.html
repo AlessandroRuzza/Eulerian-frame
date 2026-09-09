@@ -995,12 +995,6 @@ function svgCoordFromEvent(e, svgEl) {
   return pt.matrixTransform(svgEl.getScreenCTM().inverse());
 }
 
-function svgCoordFromTouch(touch, svgEl) {
-  const pt = svgEl.createSVGPoint();
-  pt.x = touch.clientX; pt.y = touch.clientY;
-  return pt.matrixTransform(svgEl.getScreenCTM().inverse());
-}
-
 function el(tag, attrs = {}) {
   const n = document.createElementNS(NS, tag);
   for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
@@ -2670,74 +2664,30 @@ class GraphState {
     if (!svgEl) return;
     this._eventsBound = true;
 
-    let justDragged = false;
-
-    svgEl.addEventListener('mousedown', e => {
-      const vg = e.target.closest('[data-vid]');
-      if (!vg) return;
-      const vid = parseInt(vg.dataset.vid);
-      const v = this.vertices.find(v => v.id === vid);
-      if (!v) return;
+    // Pointer events (mouse + touch + pen) with pointer capture on the <svg>
+    // root.  Capture matters on touch: draw() wipes svg.innerHTML, so the node
+    // the gesture started on is detached and would stop receiving touchmove.
+    svgEl.addEventListener('pointerdown', e => {
+      if (this.dragging) return;                     // ignore extra fingers
+      if (e.button !== undefined && e.button > 0) return;
       const pt = svgCoordFromEvent(e, svgEl);
-      this.dragging = {id: vid, startPt: pt, origX: v.x, origY: v.y, moved: false};
+      const vg = e.target.closest('[data-vid]');
+      const vid = vg ? parseInt(vg.dataset.vid) : null;
+      const v = vid === null ? null : this.vertices.find(v => v.id === vid);
+      this.dragging = {pointerId: e.pointerId, id: v ? vid : null,
+                       startPt: pt, origX: v ? v.x : 0, origY: v ? v.y : 0,
+                       moved: false};
+      try { svgEl.setPointerCapture(e.pointerId); } catch (_) {}
       e.preventDefault();
     });
 
-    window.addEventListener('mousemove', e => {
-      if (!this.dragging) return;
+    svgEl.addEventListener('pointermove', e => {
+      if (!this.dragging || e.pointerId !== this.dragging.pointerId) return;
       const pt = svgCoordFromEvent(e, svgEl);
       const dx = pt.x - this.dragging.startPt.x;
       const dy = pt.y - this.dragging.startPt.y;
       if (!this.dragging.moved && Math.hypot(dx, dy) > 6) this.dragging.moved = true;
-      if (this.dragging.moved) {
-        const v = this.vertices.find(v => v.id === this.dragging.id);
-        if (v) {
-          v.x = Math.max(R+4, Math.min(SVG_W-R-4, pt.x));
-          v.y = Math.max(R+4, Math.min(SVG_H-R-4, pt.y));
-          this.draw();
-        }
-      }
-    });
-
-    window.addEventListener('mouseup', () => {
-      if (this.dragging) {
-        if (this.dragging.moved) justDragged = true;
-        this.dragging = null;
-      }
-    });
-
-    svgEl.addEventListener('click', e => {
-      if (justDragged) { justDragged = false; return; }
-      const vg = e.target.closest('[data-vid]');
-      if (vg) {
-        this.selectVertex(parseInt(vg.dataset.vid));
-        return;
-      }
-      const pt = svgCoordFromEvent(e, svgEl);
-      if (!this.vertexAt(pt.x, pt.y, -1)) this.addVertex(pt.x, pt.y);
-    });
-
-    svgEl.addEventListener('touchstart', e => {
-      const touch = e.touches[0];
-      const pt = svgCoordFromTouch(touch, svgEl);
-      const vg = e.target.closest('[data-vid]');
-      if (vg) {
-        const vid = parseInt(vg.dataset.vid);
-        const v = this.vertices.find(v => v.id === vid);
-        if (v) {
-          this.dragging = {id: vid, startPt: pt, origX: v.x, origY: v.y, moved: false};
-          e.preventDefault();
-        }
-      }
-    }, {passive: false});
-
-    svgEl.addEventListener('touchmove', e => {
-      if (!this.dragging) return;
-      const pt = svgCoordFromTouch(e.touches[0], svgEl);
-      const dx = pt.x - this.dragging.startPt.x;
-      const dy = pt.y - this.dragging.startPt.y;
-      if (!this.dragging.moved && Math.hypot(dx, dy) > 6) this.dragging.moved = true;
-      if (this.dragging.moved) {
+      if (this.dragging.moved && this.dragging.id !== null) {
         const v = this.vertices.find(v => v.id === this.dragging.id);
         if (v) {
           v.x = Math.max(R+4, Math.min(SVG_W-R-4, pt.x));
@@ -2746,18 +2696,24 @@ class GraphState {
         }
         e.preventDefault();
       }
-    }, {passive: false});
-
-    svgEl.addEventListener('touchend', e => {
-      if (!this.dragging) {
-        const touch = e.changedTouches[0];
-        const pt = svgCoordFromTouch(touch, svgEl);
-        if (!this.vertexAt(pt.x, pt.y, -1)) this.addVertex(pt.x, pt.y);
-        return;
-      }
-      if (!this.dragging.moved) this.selectVertex(this.dragging.id);
-      this.dragging = null;
     });
+
+    const endPointer = e => {
+      if (!this.dragging || e.pointerId !== this.dragging.pointerId) return;
+      const d = this.dragging;
+      this.dragging = null;
+      try { svgEl.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (e.type === 'pointercancel' || d.moved) return;
+      if (d.id !== null) { this.selectVertex(d.id); return; }
+      const pt = svgCoordFromEvent(e, svgEl);
+      if (!this.vertexAt(pt.x, pt.y, -1)) this.addVertex(pt.x, pt.y);
+    };
+    svgEl.addEventListener('pointerup', endPointer);
+    svgEl.addEventListener('pointercancel', endPointer);
+
+    // Suppress the synthetic click that follows a pointer gesture; all
+    // selection / creation is handled in endPointer above.
+    svgEl.addEventListener('click', e => { e.preventDefault(); });
   }
 }
 

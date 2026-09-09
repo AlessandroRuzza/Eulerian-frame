@@ -1,0 +1,16 @@
+# Render blueprint for the hosted deployment referenced by eulsim.cli.PUBLIC_URL.
+# Render injects PORT; docker-entrypoint.sh binds to it.
+services:
+  - type: web
+    name: eulerian-frame-simulator
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: HOST
+        value: 0.0.0.0
+      # The hosted instance advertises the public URL in its Share-QR code.
+      - key: EULSIM_SHARE
+        value: public

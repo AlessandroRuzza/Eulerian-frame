@@ -41,6 +41,47 @@ The **▦ Share QR** button opens a QR code for the address the banner prints as
 default, set by `SHARE_TARGET` in `run_eulsim.py`) encodes the hosted
 deployment; `--share local` encodes this server's own LAN address instead.
 
+## Running it in a container
+
+```
+docker compose up -d --build          # http://127.0.0.1:8001/
+docker compose logs -f
+docker compose down
+```
+
+Or without compose:
+
+```
+docker build -t eulsim:latest .
+docker run -d --name eulsim -p 8001:8001 eulsim:latest
+```
+
+The image is `python:3.12-slim` with numpy installed into a venv in a builder
+stage; it runs as the unprivileged user `eulsim` and ships no shell utilities
+beyond the base image, so its healthcheck is `docker-healthcheck.py` (stdlib
+`urllib` against `/health`) rather than curl. `docker ps` shows the resulting
+health status.
+
+Configuration is by environment variable, all optional:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `HOST` | `0.0.0.0` | Bind address. |
+| `PORT` | `8001` | Bind port. Platforms that inject `PORT` (Render, Cloud Run, Fly) work unchanged. |
+| `EULSIM_SHARE` | `local` | What the Share-QR encodes — `local` (this server) or `public` (the hosted deployment). |
+
+Arguments passed after the image name go straight to the CLI and override the
+env-derived flags, e.g. `docker run ... eulsim:latest --share public`.
+
+`docker-compose.yml` runs the container read-only with a tmpfs `/tmp`, all
+capabilities dropped and `no-new-privileges`; the app writes nothing outside
+`/tmp` (`MPLCONFIGDIR`). Set `EULSIM_HOST_PORT` to publish on a different host
+port.
+
+`render.yaml` is a Render blueprint for the hosted deployment at
+`eulsim.cli.PUBLIC_URL`: Docker runtime, `/health` as the health check path,
+`EULSIM_SHARE=public`.
+
 ## What the app does
 
 Two independent graph editors, A and B, sit side by side; the comparison

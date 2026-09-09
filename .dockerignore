@@ -1,0 +1,32 @@
+# VCS
+.git
+.gitignore
+
+# Python bytecode / caches
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Not needed at runtime — the container only serves the web demo
+benchmarks/
+tests/
+*.md
+!README.md
+
+# Local tooling / editor / env
+.venv/
+venv/
+.env
+.env.*
+.vscode/
+.idea/
+.claude/
+
+# Docker files themselves
+Dockerfile
+docker-compose.yml
+.dockerignore

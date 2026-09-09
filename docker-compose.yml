@@ -1,0 +1,32 @@
+services:
+  eulsim:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12"
+    image: eulsim:latest
+    container_name: eulsim
+    restart: unless-stopped
+    ports:
+      - "${EULSIM_HOST_PORT:-8001}:8001"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8001
+      # "local" points the Share-QR at this server; "public" at the hosted
+      # deployment (eulsim.cli.PUBLIC_URL).
+      EULSIM_SHARE: "${EULSIM_SHARE:-local}"
+    # Hardening: the app writes nothing but temp files.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # The image's own HEALTHCHECK (docker-healthcheck.py) applies; no override needed.
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1g

@@ -417,8 +417,8 @@
         <button class="ghost small" onclick="graphA.loadPreset('halfrgs_gen')">half-RGS gen</button>
         <button class="ghost small" onclick="graphA.loadPreset('allphotonic')">all-photonic (4 half-RGS)</button>
         <button class="ghost small" onclick="graphA.loadPreset('allphotonic_merged')">all-photonic merged (2 RGS)</button>
-        <button class="ghost small" onclick="graphA.loadPreset('kennethfork')" title="Triangle + three forked 3-paths (12 qubits)">Kenneth-fork</button>
-        <button class="ghost small" onclick="graphA.loadPreset('kennethl')" title="Triangle + three L-shaped 3-paths (12 qubits)">Kenneth-L</button>
+        <button class="ghost small" onclick="graphA.loadPreset('kfork')" title="Triangle + three forked 3-paths (12 qubits)">K-fork</button>
+        <button class="ghost small" onclick="graphA.loadPreset('kl')" title="Triangle + three L-shaped 3-paths (12 qubits)">K-L</button>
       </div>
       <svg id="graphSvgA" class="graph-svg" viewBox="0 0 680 430"></svg>
       <p class="hint">
@@ -573,8 +573,8 @@
         <button class="ghost small" onclick="graphB.loadPreset('halfrgs_gen')">half-RGS gen</button>
         <button class="ghost small" onclick="graphB.loadPreset('allphotonic')">all-photonic (4 half-RGS)</button>
         <button class="ghost small" onclick="graphB.loadPreset('allphotonic_merged')">all-photonic merged (2 RGS)</button>
-        <button class="ghost small" onclick="graphB.loadPreset('kennethfork')" title="Triangle + three forked 3-paths (12 qubits)">Kenneth-fork</button>
-        <button class="ghost small" onclick="graphB.loadPreset('kennethl')" title="Triangle + three L-shaped 3-paths (12 qubits)">Kenneth-L</button>
+        <button class="ghost small" onclick="graphB.loadPreset('kfork')" title="Triangle + three forked 3-paths (12 qubits)">K-fork</button>
+        <button class="ghost small" onclick="graphB.loadPreset('kl')" title="Triangle + three L-shaped 3-paths (12 qubits)">K-L</button>
       </div>
       <svg id="graphSvgB" class="graph-svg" viewBox="0 0 680 430"></svg>
       <p class="hint">
@@ -2665,30 +2665,30 @@ class GraphState {
       // three 3-qubit paths), differing only in which vertex of each path is
       // the centre. "fork" bends the paths into V's, "L" into elbows; the two
       // are LC-equivalent but are different labelled graphs.
-      case 'kennethfork':
-      case 'kennethl': {
+      case 'kfork':
+      case 'kl': {
         const verts = [
-          {id:0,  x:149, y: 64, label:'B' },
-          {id:1,  x: 82, y:159, label:'5' },
-          {id:2,  x:183, y:172, label:'6' },
-          {id:3,  x:302, y:186, label:'2' },
-          {id:4,  x:375, y:193, label:'12'},
-          {id:5,  x:333, y:245, label:'11'},
-          {id:6,  x:503, y: 64, label:'14'},
-          {id:7,  x:506, y:171, label:'13'},
-          {id:8,  x:638, y:127, label:'15'},
-          {id:9,  x:335, y:358, label:'16'},
-          {id:10, x:252, y:399, label:'17'},
-          {id:11, x:412, y:388, label:'18'},
+          {id:0,  x:302, y:186, label:'A' },
+          {id:1,  x:333, y:245, label:'B'},
+          {id:2,  x:375, y:193, label:'C'},
+          {id:3,  x:149, y: 64, label:'A1' },
+          {id:4,  x: 82, y:159, label:'A2' },
+          {id:5,  x:183, y:172, label:'A3' },
+          {id:6,  x:503, y: 64, label:'B1'},
+          {id:7,  x:506, y:171, label:'B2'},
+          {id:8,  x:638, y:127, label:'B3'},
+          {id:9,  x:335, y:358, label:'C1'},
+          {id:10, x:252, y:399, label:'C2'},
+          {id:11, x:412, y:388, label:'C3'},
         ];
-        const tri = [[3,4],[3,5],[4,5]];
-        const edges = name === 'kennethfork'
-          ? [[1,2],[2,0], ...tri, [6,7],[7,8], [10,9],[9,11]]     // centres 6, 13, 16
-          : [[0,1],[1,2], ...tri, [7,6],[6,8], [10,11],[11,9]];   // centres 5, 14, 18
+        const tri = [[0,1],[0,2],[1,2]];                     // A-B-C
+        const edges = name === 'kfork'
+          ? [...tri, [3,5],[5,4], [6,7],[7,8], [9,10],[9,11]]  // path centres A3, B2, C1
+          : [...tri, [3,4],[4,5], [6,7],[6,8], [9,11],[11,10]];// path centres A2, B1, C3
         this._loadPreset(verts, edges);
-        toast(name === 'kennethfork'
-          ? 'Kenneth-fork: triangle + three forked 3-paths (12 qubits)'
-          : 'Kenneth-L: triangle + three L-shaped 3-paths (12 qubits)');
+        toast(name === 'kfork'
+          ? 'K-fork: triangle + three forked 3-paths (12 qubits)'
+          : 'K-L: triangle + three L-shaped 3-paths (12 qubits)');
         break;
       }
       case 'halfrgs_gen': {

@@ -365,6 +365,8 @@
       <button class="cmp-toggle small" id="compareModeBtn" onclick="toggleCompare()">&#8660; Compare Mode</button>
       <button class="cmp-toggle small" id="zxModeBtn" onclick="toggleZX()">&#9671; ZX Mode</button>
       <button class="cmp-toggle small" id="labelModeBtn" onclick="toggleLabelMode()">&#9636; Label Mode</button>
+      <button class="cmp-toggle small" id="cliffordModeBtn" onclick="toggleCliffordMode()" title="Label each vertex with its local Clifford L_i as a gate word instead of the vertex basis">&#9672; Clifford Mode</button>
+      <button class="cmp-toggle small" id="graphOnlyBtn" onclick="toggleGraphOnly()" title="Hide the frame entirely and work with plain graph states">&#9711; Graph Mode</button>
       <button class="cmp-toggle small" id="wHeadBtn" onclick="toggleWHeaders()" style="display:none">w<sup>N</sup>/w<sup>C</sup> headers: on</button>
       <button class="cmp-toggle small" id="dualBasisBtn" onclick="toggleDualBasis()">Showing: vertex basis</button>
       <button class="cmp-toggle small" id="resetLayoutBtn" onclick="resetLayout()">&#8635; Reset Layout</button>
@@ -378,7 +380,7 @@
       <div class="title-row">
         <h2>Graph Editor <span id="graphALabel">A</span></h2>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <span id="lcSpinA" class="lc-spinner"></span><button class="ghost small" onclick="graphA.doLCRep()">&#8595; LC Representative</button>
+          <span id="lcSpinA" class="lc-spinner"></span><button class="ghost small" onclick="graphA.doLCRep()">&#8595; LC Representative</button><button class="ghost small" style="margin-left:4px" onclick="graphA.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph State</button>
           <button class="ghost small" onclick="graphA.doCanonicalize()">Canonicalize</button>
           <label class="cgate-pick" title="2-qubit gate applied when you click two qubits">2-qubit:
             <select id="cgateSel_a" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
@@ -404,6 +406,8 @@
         <button class="ghost small" onclick="graphA.loadPreset('halfrgs_gen')">half-RGS gen</button>
         <button class="ghost small" onclick="graphA.loadPreset('allphotonic')">all-photonic (4 half-RGS)</button>
         <button class="ghost small" onclick="graphA.loadPreset('allphotonic_merged')">all-photonic merged (2 RGS)</button>
+        <button class="ghost small" onclick="graphA.loadPreset('kennethfork')" title="Triangle + three forked 3-paths (12 qubits)">Kenneth-fork</button>
+        <button class="ghost small" onclick="graphA.loadPreset('kennethl')" title="Triangle + three L-shaped 3-paths (12 qubits)">Kenneth-L</button>
       </div>
       <svg id="graphSvgA" class="graph-svg" viewBox="0 0 680 430"></svg>
       <p class="hint">
@@ -440,7 +444,7 @@
 
       <!-- Compare-mode sub-panels (hidden in single mode) -->
       <div class="graph-sub-panels" id="subPanelsA" style="display:none">
-        <div class="graph-sub-panel" style="grid-column:1/-1">
+        <div class="graph-sub-panel" style="grid-column:1/-1" data-frame-panel="1">
           <h3>Supplementary &amp; Eulerian Vectors</h3>
           <div id="evPanel_a"><p class="hint">Add qubits.</p></div>
         </div>
@@ -489,7 +493,7 @@
           <button class="ghost small" onclick="graphA.doRename()" title="Change this qubit's display name.">Rename&hellip;</button>
           <button class="danger small" onclick="graphA.doDelete()">Delete</button>
         </div>
-        <div class="btn-row">
+        <div class="btn-row" data-frame-ops="1">
           <button class="ghost small" onclick="graphA.doGate('H')">Gate H</button>
           <button class="ghost small" onclick="graphA.doGate('S')">Gate S</button>
           <button class="ghost small" onclick="graphA.doGate('SDG')">Gate S&dagger;</button>
@@ -514,7 +518,7 @@
       </section>
 
       <!-- Eulerian vectors -->
-      <section class="card reorder-card">
+      <section class="card reorder-card" data-frame-panel="1">
         <h2><span class="drag-handle" title="Drag to reorder">&#10303;</span>Supplementary &amp; Eulerian Vectors</h2>
         <div id="propsPanel_single"><p class="hint">Add qubits to see properties.</p></div>
       </section>
@@ -532,7 +536,7 @@
       <div class="title-row">
         <h2>Graph Editor B</h2>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <span id="lcSpinB" class="lc-spinner"></span><button class="ghost small" onclick="graphB.doLCRep()">&#8595; LC Representative</button>
+          <span id="lcSpinB" class="lc-spinner"></span><button class="ghost small" onclick="graphB.doLCRep()">&#8595; LC Representative</button><button class="ghost small" style="margin-left:4px" onclick="graphB.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph State</button>
           <button class="ghost small" onclick="graphB.doCanonicalize()">Canonicalize</button>
           <label class="cgate-pick" title="2-qubit gate applied when you click two qubits">2-qubit:
             <select id="cgateSel_b" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
@@ -558,6 +562,8 @@
         <button class="ghost small" onclick="graphB.loadPreset('halfrgs_gen')">half-RGS gen</button>
         <button class="ghost small" onclick="graphB.loadPreset('allphotonic')">all-photonic (4 half-RGS)</button>
         <button class="ghost small" onclick="graphB.loadPreset('allphotonic_merged')">all-photonic merged (2 RGS)</button>
+        <button class="ghost small" onclick="graphB.loadPreset('kennethfork')" title="Triangle + three forked 3-paths (12 qubits)">Kenneth-fork</button>
+        <button class="ghost small" onclick="graphB.loadPreset('kennethl')" title="Triangle + three L-shaped 3-paths (12 qubits)">Kenneth-L</button>
       </div>
       <svg id="graphSvgB" class="graph-svg" viewBox="0 0 680 430"></svg>
       <p class="hint">
@@ -593,7 +599,7 @@
 
       <!-- B sub-panels -->
       <div class="graph-sub-panels" id="subPanelsB">
-        <div class="graph-sub-panel" style="grid-column:1/-1">
+        <div class="graph-sub-panel" style="grid-column:1/-1" data-frame-panel="1">
           <h3>Supplementary &amp; Eulerian Vectors</h3>
           <div id="evPanel_b"><p class="hint">Add qubits.</p></div>
         </div>
@@ -696,7 +702,7 @@
         <button class="ghost small" onclick="graphA.doRename()" title="Change this qubit's display name.">Rename&hellip;</button>
         <button class="danger small" onclick="graphA.doDelete()">Delete</button>
       </div>
-      <div class="btn-row">
+      <div class="btn-row" data-frame-ops="1">
         <button class="ghost small" onclick="graphA.doGate('H')">Gate H</button>
         <button class="ghost small" onclick="graphA.doGate('S')">Gate S</button>
         <button class="ghost small" onclick="graphA.doGate('SDG')">Gate S&dagger;</button>
@@ -729,7 +735,7 @@
         <button class="ghost small" onclick="graphB.doRename()" title="Change this qubit's display name.">Rename&hellip;</button>
         <button class="danger small" onclick="graphB.doDelete()">Delete</button>
       </div>
-      <div class="btn-row">
+      <div class="btn-row" data-frame-ops="1">
         <button class="ghost small" onclick="graphB.doGate('H')">Gate H</button>
         <button class="ghost small" onclick="graphB.doGate('S')">Gate S</button>
         <button class="ghost small" onclick="graphB.doGate('SDG')">Gate S&dagger;</button>
@@ -819,6 +825,7 @@ function _daggerU(U){ return [U[0],-U[1],U[4],-U[5],U[2],-U[3],U[6],-U[7]]; }
 function _displayU(U){ return dualBasis ? _daggerU(U) : U; }
 const PAULI_X_MAT=[0,0,1,0,1,0,0,0];
 const PAULI_Z_MAT=[1,0,0,0,0,0,-1,0];
+const PAULI_Y_MAT=[0,0,0,-1,0,1,0,0];
 // Where X maps under U (center Pauli — appears in S_i at qubit i's own position)
 function basisFromU(U){ return _conjugatedPauli(U, PAULI_X_MAT)[1]; }
 // Where Z maps under U (neighbor Pauli — appears in S_j at qubit i's neighbor position)
@@ -835,6 +842,45 @@ function basisColors(b){
 // and each one carries its signed vertex basis "(w^N, w^C)" as text above it,
 // e.g. "(Z, X)" or "(−Y, Z)"; wHeaders adds a small w^N / w^C above the letters.
 let labelMode = true;   // default view: frame as text, vertices uncoloured
+
+// ─── Graph-only mode: hide the frame completely ──────────────────────────────
+// A pure view toggle for working with plain graph states: vertices are drawn as
+// neutral discs with no colour coding and no (w^N, w^C) labels, the frame
+// legends / vector panels / local-Clifford gate row are hidden, and the frame
+// itself is left untouched underneath (turn the mode off to see it again).
+let graphOnly = false;
+
+// ─── Clifford mode: the local Clifford itself, not the basis it induces ──────
+// Same graph view as label mode, but each vertex is annotated with a shortest
+// gate word for L_i (or L_i† in the dual view) over {H, S, S†}, read right to
+// left as usual — "HS" is S first, then H. The 24 single-qubit Cliffords mod
+// global phase are enumerated once by BFS, so the word shown is always a
+// shortest one, ties going to the generator order H < S < S†.
+let cliffordMode = false;
+const _CLIFFORD_WORDS = (() => {
+  const gens = [['H', CLIFFORD_H], ['S', CLIFFORD_S], ['S\u2020', CLIFFORD_SDG]];
+  const found = [{U: CLIFFORD_I, w: ''}];
+  for (let i = 0; i < found.length && found.length < 24; i++) {
+    for (const [gn, gm] of gens) {
+      const U = mat2x2mul(gm, found[i].U);
+      if (found.some(f => _matEqUpToPhase(U, f.U))) continue;
+      found.push({U, w: gn + found[i].w});
+      if (found.length === 24) break;
+    }
+  }
+  // The three Paulis are clearer by name than as the words that reach them.
+  const named = [['X', PAULI_X_MAT], ['Y', PAULI_Y_MAT], ['Z', PAULI_Z_MAT]];
+  for (const f of found) {
+    if (f.w === '') { f.w = 'I'; continue; }
+    const hit = named.find(([, M]) => _matEqUpToPhase(f.U, M));
+    if (hit) f.w = hit[0];
+  }
+  return found;
+})();
+function cliffordWord(U) {
+  const hit = _CLIFFORD_WORDS.find(f => _matEqUpToPhase(U || CLIFFORD_I, f.U));
+  return hit ? hit.w : '?';
+}
 let wHeaders  = true;
 // Vertex basis (L Z L†, L X L†) vs its dual (L† Z L, L† X L). Purely a display
 // choice: the state is untouched, only which conjugation the letters report.
@@ -1302,7 +1348,7 @@ class GraphState {
       return;
     }
 
-    if (zxMode) { this._drawZX(svg); this._updateEVDisplay(); return; }
+    if (zxMode && !graphOnly) { this._drawZX(svg); this._updateEVDisplay(); return; }
 
     for (const k of this.edges) {
       const [aid, bid] = k.split(',').map(Number);
@@ -1342,14 +1388,22 @@ class GraphState {
           'stroke-width':2, 'stroke-dasharray':'5 3',
         }));
       }
-      if (labelMode) {
+      if (graphOnly) {
+        g.appendChild(el('circle', {                   // plain graph-state vertex
+          cx:v.x, cy:v.y, r:R,
+          fill:   LBL_NODE_FILL,
+          stroke: LBL_NODE_STROKE,
+          'stroke-width': 2,
+        }));
+      } else if (labelMode || cliffordMode) {
         g.appendChild(el('circle', {                   // uncoloured disc; frame is text
           cx:v.x, cy:v.y, r:R,
           fill:   LBL_NODE_FILL,
           stroke: LBL_NODE_STROKE,
           'stroke-width': 2,
         }));
-        for (const t of this._frameLabels(v)) g.appendChild(t);
+        const labels = cliffordMode ? this._cliffordLabels(v) : this._frameLabels(v);
+        for (const t of labels) g.appendChild(t);
       } else {
         g.appendChild(el('circle', {                   // outer ring: Supplementary w^C
           cx:v.x, cy:v.y, r:R,
@@ -1374,7 +1428,7 @@ class GraphState {
       g.appendChild(txt);
       svg.appendChild(g);
     }
-    if (labelMode) this._alignFrameLabels();
+    if (labelMode && !cliffordMode && !graphOnly) this._alignFrameLabels();
     this._updateEVDisplay();
   }
 
@@ -1389,6 +1443,19 @@ class GraphState {
   // always — no neighbour-dependent side picking, so a screenshot layout is
   // fully controlled by where the vertices are dragged. Vertices sitting within
   // LBL_DY of the top border get their label clipped; drag them down.
+  // Clifford-mode annotation: the gate word for L_v, centred above the vertex
+  // exactly where the (w^N, w^C) label would sit.
+  _cliffordLabels(v) {
+    const t = el('text', {
+      x:v.x, y:v.y - LBL_DY, 'text-anchor':'middle', 'dominant-baseline':'central',
+      fill:LBL_TEXT, 'font-size':LBL_FS, 'font-weight':700, 'font-family':LBL_FONT,
+      'pointer-events':'none', stroke:LBL_HALO, 'stroke-width':3.2,
+      'stroke-linejoin':'round', 'paint-order':'stroke fill',
+    });
+    t.textContent = cliffordWord(_displayU(v.localU || CLIFFORD_I)) + (dualBasis ? '\u2020' : '');
+    return [t];
+  }
+
   _frameLabels(v) {
     const U = _displayU(v.localU || CLIFFORD_I);
     const [ns, np] = _conjugatedPauli(U, PAULI_Z_MAT);   // w^N (Eulerian)
@@ -1964,6 +2031,22 @@ class GraphState {
       this.busy = false;
       if (spinner) spinner.classList.remove('active');
     }
+  }
+
+  // ── Reset the frame to the identity ─────────────────────────────────────────
+  // (w^N, w^C) = (Z, X) on every qubit, i.e. L_i = I: the graph is read as the
+  // plain graph state |G⟩. The graph itself (edges, positions, labels) is
+  // untouched; the local Cliffords that were in the frame are discarded, so
+  // this generally changes the physical state. Undo restores them.
+  doGraphState() {
+    if (this.vertices.length === 0) { toast('No qubits.'); return; }
+    if (this.busy) return;
+    this._pushHistory();
+    this.vertices.forEach(v => { v.basis = 'X'; v.localU = [...CLIFFORD_I]; });
+    this.draw();
+    this.fetchCompute();
+    if (this.selectedId !== null) this.showOps(this.selectedId);
+    toast('Frame set to (Z, X) on every qubit — plain graph state.');
   }
 
   // State-vector qubit dropdown(s) for this graph. Option value = vertex index,
@@ -2567,6 +2650,36 @@ class GraphState {
         this._loadPreset(verts, edges);
         break;
       }
+      // Kenneth's two scratch states: same 12-qubit layout (a triangle plus
+      // three 3-qubit paths), differing only in which vertex of each path is
+      // the centre. "fork" bends the paths into V's, "L" into elbows; the two
+      // are LC-equivalent but are different labelled graphs.
+      case 'kennethfork':
+      case 'kennethl': {
+        const verts = [
+          {id:0,  x:149, y: 64, label:'B' },
+          {id:1,  x: 82, y:159, label:'5' },
+          {id:2,  x:183, y:172, label:'6' },
+          {id:3,  x:302, y:186, label:'2' },
+          {id:4,  x:375, y:193, label:'12'},
+          {id:5,  x:333, y:245, label:'11'},
+          {id:6,  x:503, y: 64, label:'14'},
+          {id:7,  x:506, y:171, label:'13'},
+          {id:8,  x:638, y:127, label:'15'},
+          {id:9,  x:335, y:358, label:'16'},
+          {id:10, x:252, y:399, label:'17'},
+          {id:11, x:412, y:388, label:'18'},
+        ];
+        const tri = [[3,4],[3,5],[4,5]];
+        const edges = name === 'kennethfork'
+          ? [[1,2],[2,0], ...tri, [6,7],[7,8], [10,9],[9,11]]     // centres 6, 13, 16
+          : [[0,1],[1,2], ...tri, [7,6],[6,8], [10,11],[11,9]];   // centres 5, 14, 18
+        this._loadPreset(verts, edges);
+        toast(name === 'kennethfork'
+          ? 'Kenneth-fork: triangle + three forked 3-paths (12 qubits)'
+          : 'Kenneth-L: triangle + three L-shaped 3-paths (12 qubits)');
+        break;
+      }
       case 'halfrgs_gen': {
         // Half-RGS generation register + branch-encoded arms
         // (Benchasattabuse, Hajdušek & Van Meter, IEEE TQE 2026, §V / Fig. 6).
@@ -2792,7 +2905,7 @@ function toggleCompare() {
 // (add/select/drag/edge) are unchanged, and it composes with Compare Mode.
 function toggleZX() {
   zxMode = !zxMode;
-  if (zxMode) labelMode = false;          // ZX has its own frame rendering
+  if (zxMode) { labelMode = false; cliffordMode = false; }   // ZX draws its own frame
   _syncViewMode();
   toast(zxMode
     ? 'ZX view: Z-spiders + Hadamard edges, frame as Euler decorations'
@@ -2804,11 +2917,37 @@ function toggleZX() {
 // (w^C / w^N Pauli letters) instead of being encoded in the vertex colours.
 function toggleLabelMode() {
   labelMode = !labelMode;
+  cliffordMode = false;                   // both write text above the vertex
   if (labelMode) zxMode = false;
   _syncViewMode();
   toast(labelMode
     ? 'Label view: vertex basis (w^N, w^C) as text, vertices uncoloured'
     : 'Standard graph view');
+}
+
+// ─── Clifford mode ───────────────────────────────────────────────────────────
+// Writes the frame as the local Clifford L_i itself (a gate word over H, S, S†)
+// rather than as the vertex basis (w^N, w^C) it induces. The dual toggle shows
+// L_i† instead, matching what the letters do in label mode.
+function toggleCliffordMode() {
+  cliffordMode = !cliffordMode;
+  if (cliffordMode) { zxMode = false; labelMode = false; }
+  _syncViewMode();
+  toast(cliffordMode
+    ? 'Clifford view: L_i as a gate word over H, S, S† (read right to left)'
+    : 'Standard graph view');
+}
+
+// ─── Graph-only mode ─────────────────────────────────────────────────────────
+// Hides every trace of the frame so the canvas reads as a bare graph state.
+// The frame is not reset — doGraphState() is the button that does that.
+function toggleGraphOnly() {
+  graphOnly = !graphOnly;
+  if (graphOnly) zxMode = false;          // ZX draws the frame as decorations
+  _syncViewMode();
+  toast(graphOnly
+    ? 'Graph mode: frame hidden — plain graph state view'
+    : 'Frame shown again');
 }
 
 // ─── Vertex basis vs dual vertex basis ───────────────────────────────────────
@@ -2833,24 +2972,43 @@ function toggleWHeaders() {
 
 // Button captions + per-side legends for the current view mode.
 function _syncViewMode() {
-  document.getElementById('zxModeBtn').textContent = zxMode ? '◆ Graph Mode' : '◇ ZX Mode';
-  document.getElementById('labelModeBtn').textContent = labelMode ? '▤ Colour Mode' : '▤ Label Mode';
+  const zb = document.getElementById('zxModeBtn');
+  zb.textContent = zxMode ? '◆ Exit ZX' : '◇ ZX Mode';
+  zb.style.display = graphOnly ? 'none' : '';
+  const lb = document.getElementById('labelModeBtn');
+  lb.textContent = labelMode ? '▤ Colour Mode' : '▤ Label Mode';
+  lb.style.display = (graphOnly || cliffordMode) ? 'none' : '';
+  const cb = document.getElementById('cliffordModeBtn');
+  cb.textContent = cliffordMode ? '◈ Exit Clifford' : '◈ Clifford Mode';
+  cb.style.display = graphOnly ? 'none' : '';
+  cb.classList.toggle('active', cliffordMode);
+  const gb = document.getElementById('graphOnlyBtn');
+  gb.innerHTML = graphOnly ? '◉ Show Frame' : '◯ Graph Mode';
+  gb.classList.toggle('active', graphOnly);
+  // Frame-only panels and the local-Clifford gate row make no sense with the
+  // frame hidden.
+  document.querySelectorAll('[data-frame-panel]').forEach(n => {
+    n.style.display = graphOnly ? 'none' : '';
+  });
+  document.querySelectorAll('[data-frame-ops]').forEach(n => {
+    n.style.display = graphOnly ? 'none' : '';
+  });
   const wb = document.getElementById('wHeadBtn');
-  wb.style.display = labelMode ? '' : 'none';
+  wb.style.display = (labelMode && !graphOnly && !cliffordMode) ? '' : 'none';
   const wSup = dualBasis ? '<span style="text-decoration:overline">w</span>' : 'w';
   wb.innerHTML = `${wSup}<sup>N</sup>/${wSup}<sup>C</sup> headers: ${wHeaders ? 'on' : 'off'}`;
   // The dual is a property of the frame letters, which ZX mode does not print.
   const db = document.getElementById('dualBasisBtn');
-  db.style.display = zxMode ? 'none' : '';
+  db.style.display = (zxMode || graphOnly) ? 'none' : '';
   db.innerHTML = dualBasis ? 'Showing: dual basis' : 'Showing: vertex basis';
   db.classList.toggle('active', dualBasis);
   for (const s of ['a', 'b']) {
     const std = document.getElementById(`legendStd_${s}`);
     const zx  = document.getElementById(`legendZX_${s}`);
     const lbl = document.getElementById(`legendLbl_${s}`);
-    if (std) std.style.display = (zxMode || labelMode) ? 'none' : '';
-    if (zx)  zx.style.display  = zxMode    ? '' : 'none';
-    if (lbl) lbl.style.display = labelMode ? '' : 'none';
+    if (std) std.style.display = (zxMode || labelMode || graphOnly || cliffordMode) ? 'none' : '';
+    if (zx)  zx.style.display  = (zxMode    && !graphOnly) ? '' : 'none';
+    if (lbl) lbl.style.display = (labelMode && !graphOnly && !cliffordMode) ? '' : 'none';
     const bar = dualBasis ? '<span style="text-decoration:overline">w</span>' : 'w';
     const dag = dualBasis ? ['L<sub>i</sub><sup>&dagger;</sup>ZL<sub>i</sub>',
                              'L<sub>i</sub><sup>&dagger;</sup>XL<sub>i</sub>']
@@ -3096,7 +3254,7 @@ function _contentBBox(svg, side) {
 
 // graph-A-5q-2026-08-20-14-03-11.png / frame-… in label mode / zx-… in ZX mode.
 function _exportName(g, side) {
-  const mode  = zxMode ? 'zx' : (labelMode ? 'frame' : 'graph');
+  const mode  = graphOnly ? 'graph' : (zxMode ? 'zx' : (cliffordMode ? 'clifford' : (labelMode ? 'frame' : 'colour')));
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   return `${mode}-${side.toUpperCase()}-${g.vertices.length}q-${stamp}.png`;
 }

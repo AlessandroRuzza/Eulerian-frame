@@ -49,6 +49,18 @@
     .sv-basis-ctrl select.sv-qsel { min-width:56px; padding:3px 6px; border:1px solid #ccd4e0; border-radius:6px; font-family:monospace; background:#fff; color:#1a2a3a; cursor:pointer; }
     .cgate-pick { display:inline-flex; align-items:center; gap:5px; font-size:.78rem; color:var(--muted); }
     .cgate-pick select.sv-qsel { min-width:auto; }
+    /* Fusion mode */
+    .fus-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px;
+               font-size:.82rem; color:#33415c; margin:6px 0; }
+    .fus-row select { padding:3px 6px; border:1px solid #ccd4e0; border-radius:6px;
+                      font-family:monospace; background:#fff; color:#1a2a3a; cursor:pointer; }
+    .fus-parity { font-family:monospace; font-weight:800; font-size:.92rem; color:#1a2a3a; }
+    .fus-derived { font-family:monospace; font-size:.8rem; color:var(--muted); margin:2px 0 6px; }
+    .fus-steps { list-style:none; margin:8px 0 0; padding:0; font-size:.8rem; }
+    .fus-steps li { padding:3px 8px; border-left:3px solid #d5e2f0; color:#54657e; }
+    .fus-steps li.done    { border-left-color:#2e9e5b; color:#2e9e5b; }
+    .fus-steps li.current { border-left-color:#3a86ff; color:#1a2a3a; font-weight:700;
+                            background:#eef4ff; border-radius:0 6px 6px 0; }
     .sv-basis-ctrl button { min-width:30px; padding:3px 8px; border:1px solid #ccd4e0; border-radius:6px; background:#fff; color:#1a2a3a; font-weight:800; font-family:monospace; cursor:pointer; }
     .sv-basis-ctrl button:hover { background:#f4f7fc; }
     .sv-btn-X { color:#1a8078; } .sv-btn-X:hover { border-color:#1a8078; }
@@ -369,6 +381,7 @@
     </div>
     <div class="hero-actions">
       <button class="cmp-toggle small" id="compareModeBtn" onclick="toggleCompare()">&#8660; Compare Mode</button>
+      <button class="cmp-toggle small" id="fusionModeBtn" onclick="toggleFusionMode()" title="Run a graph fusion between two qubits: local Cliffords, one CZ, two X measurements">&#10515; Fusion Mode</button>
       <button class="cmp-toggle small mode-btn" id="labelModeBtn" onclick="setViewMode('label')" title="Frame as the vertex basis (w^N, w^C) written above each vertex">&#9636; Label Mode</button>
       <!-- Colour mode is hidden for now: the vertex colours carry the Pauli
            letters but not their signs, so a negative image is indistinguishable
@@ -493,6 +506,57 @@
 
     <!-- ── Right stack (single mode only) ───────────────────────────── -->
     <div style="display:flex;flex-direction:column;gap:12px;" class="right-stack reorder-zone" id="rightStack">
+
+      <!-- Fusion (fusion mode) -->
+      <section class="card ops-card" id="fusionCard" style="display:none">
+        <h2>Fusion</h2>
+        <div class="fus-row">
+          Fuse <select id="fusQA" onchange="fusionEdited()"></select>
+          with <select id="fusQB" onchange="fusionEdited()"></select>
+        </div>
+        <div class="fus-row">
+          Type
+          <select id="fusType" onchange="fusionTypePicked()">
+            <option value="xz_zx">X&#8202;Z &#8743; Z&#8202;X &mdash; result 6.7</option>
+            <option value="xx_zz">X&#8202;X &#8743; Z&#8202;Z &mdash; result 6.8</option>
+            <option value="xy_yx">X&#8202;Y &#8743; Y&#8202;X &mdash; result 6.9</option>
+            <option value="yz_zy">Y&#8202;Z &#8743; Z&#8202;Y &mdash; result 6.10</option>
+            <option value="xy_yz">X&#8202;Y &#8743; Y&#8202;Z &mdash; result 6.11</option>
+            <option value="custom">custom&hellip;</option>
+          </select>
+        </div>
+        <div class="fus-row">
+          <span class="fus-parity">P =</span>
+          <select id="fusSA" onchange="fusionParityPicked()"><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option></select><sub>A</sub>
+          <select id="fusTB" onchange="fusionParityPicked()"><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option></select><sub>B</sub>
+          <span class="fus-parity">&nbsp;&#8743;&nbsp; P&prime; =</span>
+          <select id="fusSA2" onchange="fusionParityPicked()"><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option></select><sub>A</sub>
+          <select id="fusTB2" onchange="fusionParityPicked()"><option value="X">X</option><option value="Y">Y</option><option value="Z">Z</option></select><sub>B</sub>
+        </div>
+        <p class="fus-derived" id="fusDerived"></p>
+        <div class="btn-row">
+          <button class="sec" id="fusStepBtn" onclick="fusionStep()" title="Apply the next operation of the fusion circuit">Step &#9654;</button>
+          <button class="sec" id="fusRunBtn" onclick="fusionRunAll()" title="Apply every remaining operation">Run all &#9654;&#9654;</button>
+          <button class="ghost small" onclick="fusionReset()" title="Restore the graph as it was when this fusion was armed">&#8635; Reset</button>
+        </div>
+        <label class="meas-toggle" title="Canonicalize the frame once both qubits are measured, as in the thesis figures.">
+          <input type="checkbox" id="fusCanon" checked>
+          <span class="meas-switch"></span>
+          <span>Canonicalize at the end</span>
+        </label>
+        <label class="meas-toggle" title="Report outcome 1 for M_X(A): applies the byproduct that corrects the other branch.">
+          <input type="checkbox" id="fusInvA">
+          <span class="meas-switch"></span>
+          <span>M<sub>X</sub>(A) outcome 1</span>
+        </label>
+        <label class="meas-toggle" title="Report outcome 1 for M_X(B).">
+          <input type="checkbox" id="fusInvB">
+          <span class="meas-switch"></span>
+          <span>M<sub>X</sub>(B) outcome 1</span>
+        </label>
+        <ol class="fus-steps" id="fusSteps"></ol>
+        <p class="ops-desc" id="fusDesc">Pick the two qubits and a fusion type.</p>
+      </section>
 
       <!-- Operations -->
       <section class="card ops-card reorder-card" id="opsCard_a">
@@ -1710,12 +1774,13 @@ class GraphState {
   // qubits. In the canonical (trivial) frame CZ toggles edge (i,j); in a
   // non-canonical frame it does the correct physical gate (e.g. CZ on |0+⟩ leaves
   // the state, and the graph, unchanged). CX = H_t CZ H_t, CY = SH_t CZ (SH_t)†.
-  async doCZ(idA, idB) {
+  async doCZ(idA, idB, gateOverride) {
     if (this.busy) return;
     const {n, edges, labels, idToIdx} = this.getAdjData();
     const i = idToIdx.get(idA), j = idToIdx.get(idB);
     if (i === undefined || j === undefined || i === j) return;
-    const gate = (document.getElementById(`cgateSel_${this.side}`)?.value || 'cz');
+    const gate = gateOverride
+      || (document.getElementById(`cgateSel_${this.side}`)?.value || 'cz');
     this._pushHistory();
     this.busy = true;
     try {
@@ -1761,6 +1826,21 @@ class GraphState {
   }
 
   // ── Operations ───────────────────────────────────────────────────────────────
+  // Fold an arbitrary single-qubit Clifford into the frame of one qubit. Same
+  // bookkeeping as doGate, but the qubit and the matrix are given explicitly —
+  // fusion mode needs the C_A, C_B of the fusion circuit, which are not always
+  // one of the four named gate buttons.
+  applyCliffordU(id, U, name) {
+    const v = this.vertices.find(v => v.id === id);
+    if (!v) return;
+    this._pushHistory();
+    v.localU = mat2x2mul(U, v.localU || [...CLIFFORD_I]);
+    v.basis  = basisFromU(v.localU);
+    this.draw();
+    this.fetchCompute();
+    if (name) toast(`${name} on qubit ${v.label}`);
+  }
+
   doGate(gate) {
     if (this.selectedId === null) return;
     const v = this.vertices.find(v => v.id === this.selectedId);
@@ -1947,17 +2027,19 @@ class GraphState {
     return cb ? cb.checked : false;
   }
 
-  async doMeasure(basis) {
-    if (this.selectedId === null || this.busy) return;
+  // opts lets a script (fusion mode) name the qubit and the outcome instead of
+  // taking them from the selection and the two measurement checkboxes.
+  async doMeasure(basis, opts = {}) {
+    const id = opts.id ?? this.selectedId;
+    if (id === null || this.busy) return;
     this._pushHistory();
-    const id = this.selectedId;
     const {n, edges, labels, idToIdx} = this.getAdjData();
     const vidx = idToIdx.get(id);
     if (vidx === undefined) return;
     this.busy = true;
     try {
-      const del = this._deleteAfterMeasure();
-      const inv = this._invertResult();
+      const del = opts.del ?? this._deleteAfterMeasure();
+      const inv = opts.inv ?? this._invertResult();
       const local_unitaries = this.vertices.map(v => v.localU || [...CLIFFORD_I]);
       const display_basis = this.vertices.map(v => v.svBasis || 'Z');
       const res = await fetch('/api/measure', {
@@ -2080,6 +2162,7 @@ class GraphState {
   async fetchCompute() {
     const {n, edges, labels} = this.getAdjData();
     this._updateQubitSelect();
+    if (this.side === 'a' && fusionMode) fusionRefresh();
     const local_unitaries = this.vertices.map(v => v.localU || [...CLIFFORD_I]);
     const display_basis = this.vertices.map(v => v.svBasis || 'Z');
     try {
@@ -2862,6 +2945,7 @@ function syncMeasInvert(src) {
 
 function toggleCompare() {
   comparisonMode = !comparisonMode;
+  if (comparisonMode && fusionMode) toggleFusionMode();   // fusion lives in the right stack
   const btn = document.getElementById('compareModeBtn');
   btn.textContent = comparisonMode ? '← Single Mode' : '⇔ Compare Mode';
 
@@ -2908,6 +2992,240 @@ function toggleCompare() {
     // Back to single mode: re-render A into single-mode panels
     graphA.fetchCompute();
   }
+}
+
+// ─── Fusion mode ─────────────────────────────────────────────────────────────
+// A fusion (thesis def. 2.47) is the destructive joint measurement of two
+// commuting two-qubit parities P = σ_A τ_B and P' = σ'_A τ'_B with σ_A ≠ σ'_A
+// and τ_B ≠ τ'_B — 36 pairs, five classes in Löbl et al. Every one of them is
+// the same circuit (thesis §2.3.5, §6.2):
+//
+//     A ── C_A ──●── M_X
+//                │
+//     B ── C_B ──●── M_X
+//
+// CZ_AB turns the single-qubit observables into parities (CZ X_A CZ = X_A Z_B,
+// CZ X_B CZ = Z_A X_B), so the two X measurements read out X_A Z_B and Z_A X_B;
+// the local Cliffords C_A, C_B rotate the axes and are the only part that
+// depends on the fusion type. Since the frame absorbs C_A and C_B, and the CZ
+// and the two measurements are ordinary frame moves, the whole fusion is just a
+// sequence of operations this simulator already performs — which is the point
+// of §6.2. What is measured on |G⟩ is read off the *dual* vertex basis
+// (w̄^N, w̄^C) = (L†ZL, L†XL): by proposition 6.6 the circuit measures
+// w̄^C_A w̄^N_B ∧ w̄^N_A w̄^C_B.
+let fusionMode = false;
+let fusion = null;          // armed plan: {idA, idB, steps, idx, snapshot}
+
+const PAULI_MAT = {X: PAULI_X_MAT, Y: PAULI_Y_MAT, Z: PAULI_Z_MAT};
+
+// The five classes of thesis §6.2, as [σ_A, τ_B, σ'_A, τ'_B].
+const FUSION_TYPES = {
+  xz_zx: ['X','Z','Z','X'],   // result 6.7  — C_A = C_B = I
+  xx_zz: ['X','X','Z','Z'],   // result 6.8  — H on B
+  xy_yx: ['X','Y','Y','X'],   // result 6.9  — HSH on both
+  yz_zy: ['Y','Z','Z','Y'],   // result 6.10 — S† on both
+  xy_yz: ['X','Y','Y','Z'],   // result 6.11 — HSH on A, HS† on B
+};
+
+// The Clifford C with C†XC = sx and C†ZC = sz. A sign-exact C is preferred (it
+// is the one the thesis quotes); failing that any C whose images are right up
+// to sign will do, since the fusion types of [41] are defined up to sign and
+// the sign only swaps the two outcomes of the parity.
+function _cliffordForImages(sx, sz) {
+  let loose = null;
+  for (const f of _CLIFFORD_WORDS) {
+    const Ud = _daggerU(f.U);
+    const [xs, xp] = _conjugatedPauli(Ud, PAULI_X_MAT);
+    const [zs, zp] = _conjugatedPauli(Ud, PAULI_Z_MAT);
+    if (xp !== sx || zp !== sz) continue;
+    if (xs > 0 && zs > 0) return f;
+    if (!loose) loose = f;
+  }
+  return loose;
+}
+
+const _fusEl = id => document.getElementById(id);
+function _fusionChoice() {
+  return {
+    idA: Number(_fusEl('fusQA').value),
+    idB: Number(_fusEl('fusQB').value),
+    sA:  _fusEl('fusSA').value,  tB:  _fusEl('fusTB').value,
+    sA2: _fusEl('fusSA2').value, tB2: _fusEl('fusTB2').value,
+  };
+}
+
+// C_A realises (σ_A, σ'_A) as (C†XC, C†ZC); C_B realises (τ'_B, τ_B), because
+// the circuit measures X on A against Z on B and vice versa.
+function _fusionCliffords(c) {
+  if (c.sA === c.sA2 || c.tB === c.tB2) return null;   // P, P' would not commute
+  const A = _cliffordForImages(c.sA, c.sA2);
+  const B = _cliffordForImages(c.tB2, c.tB);
+  return (A && B) ? {A, B} : null;
+}
+
+// What the circuit will actually measure on |G⟩, signs included (prop. 6.6).
+function _fusionReadout(idA, idB) {
+  const va = graphA.vertices.find(v => v.id === idA);
+  const vb = graphA.vertices.find(v => v.id === idB);
+  if (!va || !vb) return null;
+  const dA = _daggerU(va.localU || CLIFFORD_I);       // dual basis: L†ZL, L†XL
+  const dB = _daggerU(vb.localU || CLIFFORD_I);
+  const [nas, nap] = _conjugatedPauli(dA, PAULI_Z_MAT);   // w̄^N_A
+  const [cas, cap] = _conjugatedPauli(dA, PAULI_X_MAT);   // w̄^C_A
+  const [nbs, nbp] = _conjugatedPauli(dB, PAULI_Z_MAT);   // w̄^N_B
+  const [cbs, cbp] = _conjugatedPauli(dB, PAULI_X_MAT);   // w̄^C_B
+  const sgn = s => s < 0 ? '&minus;' : '';
+  const a = escapeHtml(va.label), b = escapeHtml(vb.label);
+  return `${sgn(cas*nbs)}${cap}<sub>${a}</sub>${nbp}<sub>${b}</sub>`
+       + ` &and; ${sgn(nas*cbs)}${nap}<sub>${a}</sub>${cbp}<sub>${b}</sub>`;
+}
+
+// ── UI ───────────────────────────────────────────────────────────────────────
+function toggleFusionMode() {
+  fusionMode = !fusionMode;
+  if (fusionMode && comparisonMode) toggleCompare();    // fusion drives graph A
+  _fusEl('fusionModeBtn').textContent = fusionMode ? '← Exit Fusion' : '⤓ Fusion Mode';
+  _fusEl('fusionCard').style.display = fusionMode ? '' : 'none';
+  fusion = null;
+  if (fusionMode) { _fusionSetParities(FUSION_TYPES[_fusEl('fusType').value] || FUSION_TYPES.xz_zx); }
+  fusionRefresh();
+  toast(fusionMode
+    ? 'Fusion mode: pick two qubits and a parity pair, then step through the circuit'
+    : 'Fusion mode off');
+}
+
+function _fusionSetParities([sA, tB, sA2, tB2]) {
+  _fusEl('fusSA').value = sA;  _fusEl('fusTB').value  = tB;
+  _fusEl('fusSA2').value = sA2; _fusEl('fusTB2').value = tB2;
+}
+
+function fusionTypePicked() {
+  const t = FUSION_TYPES[_fusEl('fusType').value];
+  if (t) _fusionSetParities(t);
+  fusionEdited();
+}
+
+// Editing the parities by hand drops to "custom" unless they match a class.
+function fusionParityPicked() {
+  const c = _fusionChoice();
+  const hit = Object.entries(FUSION_TYPES).find(([, t]) =>
+    t[0] === c.sA && t[1] === c.tB && t[2] === c.sA2 && t[3] === c.tB2);
+  _fusEl('fusType').value = hit ? hit[0] : 'custom';
+  fusionEdited();
+}
+
+// Any change to the plan disarms the current run (the steps would no longer
+// match what is on the canvas).
+function fusionEdited() {
+  fusion = null;
+  fusionRefresh();
+}
+
+function _fusionQubitSelects() {
+  for (const [id, prefer] of [['fusQA', 'A'], ['fusQB', 'B']]) {
+    const sel = _fusEl(id);
+    const prev = sel.value;
+    sel.innerHTML = graphA.vertices
+      .map(v => `<option value="${v.id}">${escapeHtml(v.label)}</option>`).join('');
+    const keep = graphA.vertices.some(v => String(v.id) === prev);
+    if (keep) sel.value = prev;
+    else {
+      const p = graphA.vertices.find(v => v.label === prefer);
+      if (p) sel.value = String(p.id);
+    }
+  }
+}
+
+function fusionRefresh() {
+  if (!fusionMode) return;
+  if (!fusion || fusion.idx >= fusion.steps.length) _fusionQubitSelects();
+  const c = _fusionChoice();
+  const cl = _fusionCliffords(c);
+  const der = _fusEl('fusDerived');
+  if (!cl) {
+    der.innerHTML = 'P and P&prime; must differ on both qubits '
+                  + '(&sigma;<sub>A</sub> &ne; &sigma;&prime;<sub>A</sub>, '
+                  + '&tau;<sub>B</sub> &ne; &tau;&prime;<sub>B</sub>) to commute.';
+  } else {
+    const readout = _fusionReadout(c.idA, c.idB);
+    der.innerHTML = `C<sub>A</sub> = ${cl.A.w} &nbsp; C<sub>B</sub> = ${cl.B.w}`
+      + (readout ? `<br>measures on |G&rang;: ${readout}` : '');
+  }
+  const list = _fusEl('fusSteps');
+  const steps = fusion ? fusion.steps : (cl ? _fusionPlan(c, cl).steps : []);
+  const at = fusion ? fusion.idx : 0;
+  list.innerHTML = steps.map((st, i) =>
+    `<li class="${i < at ? 'done' : (i === at ? 'current' : '')}">${st.label}</li>`).join('');
+  const done = fusion && fusion.idx >= fusion.steps.length;
+  _fusEl('fusStepBtn').disabled = !cl || done;
+  _fusEl('fusRunBtn').disabled  = !cl || done;
+  _fusEl('fusDesc').innerHTML = !cl ? 'Pick a commuting parity pair.'
+    : done ? 'Fusion complete &mdash; Reset restores the state it started from.'
+    : fusion ? `Step ${fusion.idx + 1} of ${fusion.steps.length}.`
+    : 'Step or Run all arms the fusion and snapshots the current state.';
+}
+
+// The circuit as a list of operations, in the order of thesis §6.2.
+function _fusionPlan(c, cl) {
+  const lbl = id => escapeHtml(graphA.vertices.find(v => v.id === id)?.label ?? id);
+  const a = lbl(c.idA), b = lbl(c.idB);
+  const steps = [];
+  if (cl.A.w !== 'I') steps.push({label: `C<sub>A</sub> = ${cl.A.w} on ${a}`,
+    run: () => graphA.applyCliffordU(c.idA, cl.A.U, `C_A = ${cl.A.w}`)});
+  if (cl.B.w !== 'I') steps.push({label: `C<sub>B</sub> = ${cl.B.w} on ${b}`,
+    run: () => graphA.applyCliffordU(c.idB, cl.B.U, `C_B = ${cl.B.w}`)});
+  steps.push({label: `CZ(${a}, ${b})`, run: () => graphA.doCZ(c.idA, c.idB, 'cz')});
+  steps.push({label: `M<sub>X</sub>(${b})`,
+    run: () => graphA.doMeasure('x', {id: c.idB, del: true, inv: _fusEl('fusInvB').checked})});
+  steps.push({label: `M<sub>X</sub>(${a})`,
+    run: () => graphA.doMeasure('x', {id: c.idA, del: true, inv: _fusEl('fusInvA').checked})});
+  if (_fusEl('fusCanon').checked)
+    steps.push({label: 'Canonicalize the frame', run: () => graphA.doCanonicalize()});
+  return {idA: c.idA, idB: c.idB, steps, idx: 0};
+}
+
+function _fusionArm() {
+  const c = _fusionChoice();
+  const cl = _fusionCliffords(c);
+  if (!cl) return null;
+  if (c.idA === c.idB) { toast('Pick two different qubits.'); return null; }
+  const gone = [c.idA, c.idB].find(id => !graphA.vertices.some(v => v.id === id));
+  if (gone !== undefined) { toast('That qubit is no longer in the graph.'); fusionRefresh(); return null; }
+  const plan = _fusionPlan(c, cl);
+  plan.snapshot = {
+    vertices: graphA.vertices.map(v => ({...v, localU: [...(v.localU || CLIFFORD_I)]})),
+    edges:    [...graphA.edges].map(k => k.split(',').map(Number)),
+  };
+  fusion = plan;
+  return plan;
+}
+
+async function fusionStep() {
+  if (graphA.busy) return;
+  if (!fusion && !_fusionArm()) return;
+  if (fusion.idx >= fusion.steps.length) return;
+  const st = fusion.steps[fusion.idx++];
+  await st.run();
+  fusionRefresh();
+}
+
+async function fusionRunAll() {
+  if (graphA.busy) return;
+  if (!fusion && !_fusionArm()) return;
+  while (fusion && fusion.idx < fusion.steps.length) {
+    const st = fusion.steps[fusion.idx++];
+    await st.run();
+    fusionRefresh();
+  }
+}
+
+function fusionReset() {
+  if (!fusion || graphA.busy) { fusionEdited(); return; }
+  const snap = fusion.snapshot;
+  fusion = null;
+  graphA._loadRaw(snap.vertices, snap.edges);
+  fusionRefresh();
+  toast('Fusion reset — state restored');
 }
 
 // ─── View modes ──────────────────────────────────────────────────────────────

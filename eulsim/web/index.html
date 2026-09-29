@@ -155,6 +155,8 @@
       background: linear-gradient(135deg,#8b93a1,#6b727e);
       color: #eef1f5; box-shadow: none;
     }
+    /* A greyed mode button is the mode you are already in: inert, not a toggle. */
+    button.mode-btn.active { pointer-events: none; cursor: default; }
     button.sync-btn {
       background: linear-gradient(135deg,#0891b2,#0e7490);
     }
@@ -367,10 +369,15 @@
     </div>
     <div class="hero-actions">
       <button class="cmp-toggle small" id="compareModeBtn" onclick="toggleCompare()">&#8660; Compare Mode</button>
-      <button class="cmp-toggle small" id="zxModeBtn" onclick="toggleZX()">&#9671; ZX Mode</button>
-      <button class="cmp-toggle small" id="labelModeBtn" onclick="toggleLabelMode()">&#9636; Label Mode</button>
-      <button class="cmp-toggle small" id="cliffordModeBtn" onclick="toggleCliffordMode()" title="Label each vertex with its local Clifford L_i as a gate word instead of the vertex basis">&#9672; Clifford Mode</button>
-      <button class="cmp-toggle small" id="graphOnlyBtn" onclick="toggleGraphOnly()" title="Hide the frame entirely and work with plain graph states">&#9711; Graph Mode</button>
+      <button class="cmp-toggle small mode-btn" id="labelModeBtn" onclick="setViewMode('label')" title="Frame as the vertex basis (w^N, w^C) written above each vertex">&#9636; Label Mode</button>
+      <!-- Colour mode is hidden for now: the vertex colours carry the Pauli
+           letters but not their signs, so a negative image is indistinguishable
+           from a positive one. The renderer is untouched — drop the display:none
+           (or call setViewMode('colour')) to bring it back. -->
+      <button class="cmp-toggle small mode-btn" id="colourModeBtn" style="display:none" onclick="setViewMode('colour')" title="Frame encoded in the vertex colours: outer ring w^C, inner core w^N">&#9635; Colour Mode</button>
+      <button class="cmp-toggle small mode-btn" id="cliffordModeBtn" onclick="setViewMode('clifford')" title="Frame as the local Clifford L_i itself, written as a gate word over H, S, S&dagger;">&#9672; Clifford Mode</button>
+      <button class="cmp-toggle small mode-btn" id="zxModeBtn" onclick="setViewMode('zx')" title="Decorated graph-like ZX diagram: Z-spiders, Hadamard edges, frame as Euler decorations">&#9671; ZX Mode</button>
+      <button class="cmp-toggle small mode-btn" id="graphOnlyBtn" onclick="setViewMode('graph')" title="Hide the frame entirely and work with plain graph states">&#9711; Graph Mode</button>
       <button class="cmp-toggle small" id="wHeadBtn" onclick="toggleWHeaders()">w<sup>N</sup>/w<sup>C</sup> headers: on</button>
       <button class="cmp-toggle small" id="dualBasisBtn" onclick="toggleDualBasis()">Showing: vertex basis</button>
       <button class="cmp-toggle small" id="resetLayoutBtn" onclick="resetLayout()">&#8635; Reset Layout</button>
@@ -2903,55 +2910,35 @@ function toggleCompare() {
   }
 }
 
-// ─── ZX mode ──────────────────────────────────────────────────────────────────
-// Re-renders the canvas as the decorated graph-like ZX diagram of the framed
-// state (stabilizer fragment). Purely a view toggle: state and interactions
-// (add/select/drag/edge) are unchanged, and it composes with Compare Mode.
-function toggleZX() {
-  zxMode = !zxMode;
-  if (zxMode) { labelMode = false; cliffordMode = false; }   // ZX draws its own frame
-  _syncViewMode();
-  toast(zxMode
-    ? 'ZX view: Z-spiders + Hadamard edges, frame as Euler decorations'
-    : 'Standard graph view');
-}
+// ─── View modes ──────────────────────────────────────────────────────────────
+// Five mutually exclusive ways to draw the same state; every one has its own
+// button and the one in force is greyed out and inert, so a mode is only ever
+// entered by naming it. None of them touches the state — only its rendering.
+//
+//   colour    frame in the vertex colours: outer ring w^C, inner core w^N
+//   label     frame as the vertex basis (w^N, w^C) written above the vertex
+//   clifford  frame as the local Clifford L_i itself, a gate word over H, S, S†
+//   zx        decorated graph-like ZX diagram, frame as Euler decorations
+//   graph     frame hidden completely — a bare graph state
+const VIEW_MODES = ['colour', 'label', 'clifford', 'zx', 'graph'];
+const VIEW_MODE_TOAST = {
+  colour:   'Colour view: outer ring = w^C, inner core = w^N',
+  label:    'Label view: vertex basis (w^N, w^C) as text, vertices uncoloured',
+  clifford: 'Clifford view: L_i as a gate word over H, S, S† (read right to left)',
+  zx:       'ZX view: Z-spiders + Hadamard edges, frame as Euler decorations',
+  graph:    'Graph mode: frame hidden — plain graph state view',
+};
+let viewMode = 'label';                  // default view
 
-// ─── Label mode ───────────────────────────────────────────────────────────────
-// Same graph view, but the frame is written next to each vertex as text
-// (w^C / w^N Pauli letters) instead of being encoded in the vertex colours.
-function toggleLabelMode() {
-  labelMode = !labelMode;
-  cliffordMode = false;                   // both write text above the vertex
-  if (labelMode) zxMode = false;
+function setViewMode(mode) {
+  if (!VIEW_MODES.includes(mode) || mode === viewMode) return;   // grey = inert
+  viewMode     = mode;
+  labelMode    = mode === 'label';
+  cliffordMode = mode === 'clifford';
+  zxMode       = mode === 'zx';
+  graphOnly    = mode === 'graph';
   _syncViewMode();
-  toast(labelMode
-    ? 'Label view: vertex basis (w^N, w^C) as text, vertices uncoloured'
-    : 'Standard graph view');
-}
-
-// ─── Clifford mode ───────────────────────────────────────────────────────────
-// Writes the frame as the local Clifford L_i itself (a gate word over H, S, S†)
-// rather than as the vertex basis (w^N, w^C) it induces. The dual toggle shows
-// L_i† instead, matching what the letters do in label mode.
-function toggleCliffordMode() {
-  cliffordMode = !cliffordMode;
-  if (cliffordMode) { zxMode = false; labelMode = false; }
-  _syncViewMode();
-  toast(cliffordMode
-    ? 'Clifford view: L_i as a gate word over H, S, S† (read right to left)'
-    : 'Standard graph view');
-}
-
-// ─── Graph-only mode ─────────────────────────────────────────────────────────
-// Hides every trace of the frame so the canvas reads as a bare graph state.
-// The frame is not reset — doGraphState() is the button that does that.
-function toggleGraphOnly() {
-  graphOnly = !graphOnly;
-  if (graphOnly) zxMode = false;          // ZX draws the frame as decorations
-  _syncViewMode();
-  toast(graphOnly
-    ? 'Graph mode: frame hidden — plain graph state view'
-    : 'Frame shown again');
+  toast(VIEW_MODE_TOAST[mode]);
 }
 
 // ─── Vertex basis vs dual vertex basis ───────────────────────────────────────
@@ -2977,15 +2964,13 @@ function toggleWHeaders() {
 // Button captions + per-side legends for the current view mode.
 function _syncViewMode() {
   // Every mode button stays visible at all times; the one in force is greyed
-  // out via .active, and clicking it again returns to the plain colour view.
-  const zb = document.getElementById('zxModeBtn');
-  zb.classList.toggle('active', zxMode);
-  const lb = document.getElementById('labelModeBtn');
-  lb.classList.toggle('active', labelMode);
-  const cb = document.getElementById('cliffordModeBtn');
-  cb.classList.toggle('active', cliffordMode);
-  const gb = document.getElementById('graphOnlyBtn');
-  gb.classList.toggle('active', graphOnly);
+  // out and does nothing when clicked.
+  const modeBtn = {colour:'colourModeBtn', label:'labelModeBtn',
+                   clifford:'cliffordModeBtn', zx:'zxModeBtn', graph:'graphOnlyBtn'};
+  for (const [m, id] of Object.entries(modeBtn)) {
+    const b = document.getElementById(id);
+    if (b) b.classList.toggle('active', viewMode === m);
+  }
   // Frame-only panels and the local-Clifford gate row make no sense with the
   // frame hidden.
   document.querySelectorAll('[data-frame-panel]').forEach(n => {

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .iso import ISO_MAX_QUBITS
 from .lc_orbit import MAX_BFS_STATES, NODE_LIMIT
 
 _WEB_DIR = Path(__file__).resolve().parent / "web"
@@ -18,4 +19,6 @@ def build_page(ui_version: str, share_url: str = "") -> str:
             .replace("__MAX_BFS_STATES__", str(MAX_BFS_STATES))
             .replace("__MAX_BFS_STATES_JS__", str(MAX_BFS_STATES))
             .replace("__NODE_LIMIT__", str(NODE_LIMIT))
-            .replace("__NODE_LIMIT_JS__", str(NODE_LIMIT)))
+            .replace("__NODE_LIMIT_JS__", str(NODE_LIMIT))
+            .replace("__ISO_MAX_QUBITS__", str(ISO_MAX_QUBITS))
+            .replace("__ISO_MAX_QUBITS_JS__", str(ISO_MAX_QUBITS)))

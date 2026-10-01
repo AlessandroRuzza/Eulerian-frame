@@ -404,7 +404,7 @@
       <div class="title-row">
         <h2>Graph Editor <span id="graphALabel">A</span></h2>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <span id="lcSpinA" class="lc-spinner"></span><button class="ghost small" onclick="graphA.doLCRep()">&#8595; LC Representative</button><button class="ghost small" style="margin-left:4px" onclick="graphA.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph State</button>
+          <span id="lcSpinA" class="lc-spinner"></span><button class="ghost small" onclick="graphA.doLCRep()">&#8595; LC rep</button><button class="ghost small" style="margin-left:4px" onclick="graphA.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph</button>
           <button class="ghost small" onclick="graphA.doCanonicalize()">Canonicalize</button>
           <label class="cgate-pick" title="2-qubit gate applied when you click two qubits">2-qubit:
             <select id="cgateSel_a" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
@@ -611,7 +611,7 @@
       <div class="title-row">
         <h2>Graph Editor B</h2>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <span id="lcSpinB" class="lc-spinner"></span><button class="ghost small" onclick="graphB.doLCRep()">&#8595; LC Representative</button><button class="ghost small" style="margin-left:4px" onclick="graphB.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph State</button>
+          <span id="lcSpinB" class="lc-spinner"></span><button class="ghost small" onclick="graphB.doLCRep()">&#8595; LC rep</button><button class="ghost small" style="margin-left:4px" onclick="graphB.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph</button>
           <button class="ghost small" onclick="graphB.doCanonicalize()">Canonicalize</button>
           <label class="cgate-pick" title="2-qubit gate applied when you click two qubits">2-qubit:
             <select id="cgateSel_b" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
@@ -713,7 +713,7 @@
     <!-- ── LC Equivalence card (compare mode) ────────────────────── -->
     <section class="card cmp-full" id="lcEquivCard" style="display:none">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
-        <h2 style="margin:0">Comparison: |&psi;<sub>A</sub>&rang; = |&psi;<sub>B</sub>&rang; ? &nbsp;&middot;&nbsp; G<sub>A</sub> ~<sub>LC</sub> G<sub>B</sub> ?</h2>
+        <h2 style="margin:0">Comparison: |&psi;<sub>A</sub>&rang; = |&psi;<sub>B</sub>&rang; ? &nbsp;&middot;&nbsp; G<sub>A</sub> ~<sub>LC</sub> G<sub>B</sub> ? &nbsp;&middot;&nbsp; G<sub>A</sub> &cong; G<sub>B</sub> ?</h2>
         <button class="small sec" onclick="checkLCEquiv()" style="margin-left:auto">&#8635; Re-check</button>
         <button class="small ghost" id="detailsToggleBtn" onclick="toggleDetails()">Hide Details</button>
       </div>
@@ -722,6 +722,9 @@
       </div>
       <div id="lcEquivBanner" class="lceq-banner unknown">
         <span>Enable Compare Mode to check LC-equivalence.</span>
+      </div>
+      <div id="isoBanner" class="lceq-banner unknown" style="margin-top:8px">
+        <span>Enable Compare Mode to check isomorphism.</span>
       </div>
       <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:10px">
         <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px">
@@ -738,7 +741,15 @@
                  style="width:60px;padding:2px 6px;border:1px solid #ccd;border-radius:6px;font-size:.85rem">
           qubits
         </label>
-        <span class="hint" style="margin:0">(labeled BFS over LC orbit of G<sub>A</sub>)</span>
+        <label class="hint" style="margin:0;display:flex;align-items:center;gap:6px"
+               title="Isomorphism is only checked at or below this qubit count: the search is exponential in the worst case.">
+          Iso cap:
+          <input type="number" id="inputIsoMax" min="0" max="100" step="1"
+                 value="__ISO_MAX_QUBITS__" onchange="checkIso()"
+                 style="width:60px;padding:2px 6px;border:1px solid #ccd;border-radius:6px;font-size:.85rem">
+          qubits
+        </label>
+        <span class="hint" style="margin:0">(labeled BFS over LC orbit of G<sub>A</sub>; isomorphism by canonical labelling)</span>
       </div>
     </section>
 
@@ -3400,6 +3411,7 @@ function renderStateEqual(data) {
 async function checkLCEquiv() {
   if (!comparisonMode) return;
   checkStateEqual();          // independent + fast: don't wait on the LC BFS
+  checkIso();                 // likewise: a different question, its own cap
   const banner = document.getElementById('lcEquivBanner');
   banner.className = 'lceq-banner checking';
   banner.innerHTML = '<span>Checking LC-equivalence&hellip;</span>';
@@ -3426,6 +3438,66 @@ async function checkLCEquiv() {
   } catch(e) {
     banner.className = 'lceq-banner unknown';
     banner.innerHTML = `<span>Error: ${e.message}</span>`;
+  }
+}
+
+// Isomorphism: is G_B the same graph as G_A after renaming the qubits? Coarser
+// than the LC check above (which keeps the labelling fixed) and blind to the
+// frame — it compares graphs, not states. Decided server-side by canonical
+// labelling (individualization-refinement, see eulsim/iso.py); the cap exists
+// because that search is exponential in the worst case.
+async function checkIso() {
+  if (!comparisonMode) return;
+  const banner = document.getElementById('isoBanner');
+  if (!banner) return;
+  banner.className = 'lceq-banner checking';
+  banner.innerHTML = '<span>Checking isomorphism&hellip;</span>';
+
+  const {n: nA, edges: edgesA, labels: labA} = graphA.getAdjData();
+  const {n: nB, edges: edgesB, labels: labB} = graphB.getAdjData();
+  const isoMax = parseInt(document.getElementById('inputIsoMax')?.value);
+
+  try {
+    const res = await fetch('/api/iso', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        graph_a: {n: nA, edges: edgesA, labels: labA},
+        graph_b: {n: nB, edges: edgesB, labels: labB},
+        max_qubits: Number.isFinite(isoMax) ? isoMax : __ISO_MAX_QUBITS_JS__,
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'request failed');
+    renderIso(data);
+  } catch(e) {
+    banner.className = 'lceq-banner unknown';
+    banner.innerHTML = `<span>Error: ${e.message}</span>`;
+  }
+}
+
+function renderIso(data) {
+  const banner = document.getElementById('isoBanner');
+  if (data.result === true) {
+    // The mapping is the renaming that turns G_A into G_B; show it when it is
+    // short enough to read, since that is the useful part of a yes.
+    const pairs = data.mapping_labels || [];
+    const moved = pairs.filter(([a, b]) => a !== b);
+    const shown = moved.length === 0 ? 'identity'
+      : moved.length <= 10
+        ? moved.map(([a, b]) => `${escapeHtml(a)}&rarr;${escapeHtml(b)}`).join(', ')
+        : `${moved.length} qubits renamed`;
+    banner.className = 'lceq-banner equiv';
+    banner.innerHTML = `<span>&#10003; G<sub>A</sub> &cong; G<sub>B</sub> &mdash; isomorphic</span>
+      <span class="lceq-stat">${data.msg} &middot; ${shown}</span>`;
+  } else if (data.result === false) {
+    banner.className = 'lceq-banner nonequiv';
+    banner.innerHTML = `<span>&#10007; G<sub>A</sub> &#8775; G<sub>B</sub> &mdash; not isomorphic</span>
+      <span class="lceq-stat">${data.msg}</span>`;
+  } else {
+    banner.className = 'lceq-banner unknown';
+    banner.innerHTML = `<span>? Isomorphism undecided</span>
+      <span class="lceq-stat">${data.msg || ''}</span>`;
   }
 }
 

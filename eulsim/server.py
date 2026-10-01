@@ -19,6 +19,7 @@ from .canonical import canonicalize
 from .frames import frame_from_wire, frame_to_wire, name
 from .gates import apply_controlled
 from .graph_ops import adj_from_edges, do_measure, edge_list, reframe_move
+from .iso import ISO_MAX_QUBITS, isomorphic
 from .lc_orbit import (
     MAX_BFS_STATES,
     NODE_LIMIT,
@@ -227,6 +228,24 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"result": result, "msg": msg,
                             "orbit_size_a": orbit_a, "orbit_size_b": orbit_b,
                             "n": n_a})
+            elif path == "/api/iso":
+                # Isomorphism of the two graphs up to a renaming of the qubits —
+                # independent of the frame and coarser than labelled
+                # LC-equivalence.  Capped by qubit count: the search is
+                # exponential in the worst case (see iso.py).
+                ga = body.get("graph_a", {})
+                gb = body.get("graph_b", {})
+                adj_a, n_a, labels_a = self._parse_graph(ga)
+                adj_b, n_b, labels_b = self._parse_graph(gb)
+                req_max = int(body.get("max_qubits", ISO_MAX_QUBITS))
+                result, msg, info = isomorphic(adj_a, n_a, adj_b, n_b,
+                                               max_qubits=req_max)
+                mapping = info.get("mapping")
+                pairs = ([[labels_a[i], labels_b[mapping[i]]] for i in range(n_a)]
+                         if mapping else None)
+                self._json({"result": result, "msg": msg, "n": n_a,
+                            "mapping": mapping, "mapping_labels": pairs,
+                            "nodes": info.get("nodes")})
             elif path == "/api/state_equal":
                 # Equality of the two *physical* states (frames included): two
                 # framed states describe the same state iff their canonical

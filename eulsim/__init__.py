@@ -50,12 +50,14 @@ from .lc_orbit import (
     lc_equiv_labeled,
     lc_orbit_size,
 )
+from .iso import ISO_MAX_QUBITS, canonical_labelling, isomorphic
 from .properties import compute_properties
 from .statevector import MAX_SV_QUBITS, compute_state_vector
 from .tableau import compute_stabilizers
 
 __all__ = [
     "UI_VERSION", "MAX_SV_QUBITS", "MAX_BFS_STATES", "NODE_LIMIT",
+    "ISO_MAX_QUBITS", "isomorphic", "canonical_labelling",
     "ID_PAIR", "parse_frame", "frame_from_wire", "frame_to_wire",
     "local_complement", "reframe_move", "do_measure",
     "compute_stabilizers", "canonicalize", "canonicalize_rref",

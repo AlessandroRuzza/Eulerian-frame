@@ -85,7 +85,7 @@ port.
 ## What the app does
 
 Two independent graph editors, A and B, sit side by side; the comparison
-panels (LC-equivalence, state equality) run between them.
+panels (state equality, LC-equivalence, isomorphism) run between them.
 
 Per-qubit operations, all applied by clicking a vertex:
 
@@ -132,6 +132,7 @@ so each request carries the whole graph and gets the whole updated state back.
 | `POST /api/state_equal` | are A and B the same physical state? |
 | `POST /api/lc_canonical` | LC-orbit representative and orbit size |
 | `POST /api/lc_equiv` | are A and B LC-equivalent as labelled graphs? |
+| `POST /api/iso` | are A and B isomorphic (equal up to renaming the qubits)? `max_qubits` caps the search |
 | `GET /health` | `{"ok": true}` |
 
 A graph on the wire is `{"n": ..., "edges": [[i, j], ...]}`, optionally with
@@ -171,6 +172,7 @@ eulsim/
   statevector.py      dense state-vector expansion (display)
   properties.py       graph-theoretic properties/tags
   lc_orbit.py         LC-orbit BFS: equivalence, representative, orbit size
+  iso.py              graph isomorphism + canonical labelling (individualization-refinement)
   sim.py              in-place stateful simulator (operation streams)
   server.py           HTTP handler + JSON API endpoints
   page.py             HTML page assembly

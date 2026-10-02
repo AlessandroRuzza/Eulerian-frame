@@ -57,7 +57,8 @@
     .fus-parity { font-family:monospace; font-weight:800; font-size:.92rem; color:#1a2a3a; }
     .fus-derived { font-family:monospace; font-size:.8rem; color:var(--muted); margin:2px 0 6px; }
     .fus-steps { list-style:none; margin:8px 0 0; padding:0; font-size:.8rem; }
-    .fus-modal { width:min(440px,92vw); }
+    .fus-modal { width:min(440px,92vw); max-height:92vh; overflow-y:auto; }
+    .fus-pm { min-width:28px; padding:2px 8px; font-weight:800; }
     .fus-steps li { padding:3px 8px; border-left:3px solid #d5e2f0; color:#54657e; }
     .fus-steps li.done    { border-left-color:#2e9e5b; color:#2e9e5b; }
     .fus-steps li.current { border-left-color:#3a86ff; color:#1a2a3a; font-weight:700;
@@ -511,10 +512,7 @@
       <!-- Fusion (fusion mode) -->
       <section class="card ops-card" id="fusionCard" style="display:none">
         <h2>Fusion</h2>
-        <div class="fus-row">
-          Fuse <select id="fusQA" onchange="fusionEdited()"></select>
-          with <select id="fusQB" onchange="fusionEdited()"></select>
-        </div>
+        <div id="fusPairs"></div>
         <div class="fus-row">
           Type
           <select id="fusType" onchange="fusionTypePicked()">
@@ -3028,7 +3026,7 @@ function toggleCompare() {
 // (w̄^N, w̄^C) = (L†ZL, L†XL): by proposition 6.6 the circuit measures
 // w̄^C_A w̄^N_B ∧ w̄^N_A w̄^C_B.
 let fusionMode = false;
-let fusion = null;          // armed plan: {idA, idB, steps, idx, snapshot}
+let fusion = null;          // armed plan: {pairs, steps, idx, snapshot}
 
 const PAULI_MAT = {X: PAULI_X_MAT, Y: PAULI_Y_MAT, Z: PAULI_Z_MAT};
 
@@ -3061,8 +3059,7 @@ function _cliffordForImages(sx, sz) {
 const _fusEl = id => document.getElementById(id);
 function _fusionChoice() {
   return {
-    idA: Number(_fusEl('fusQA').value),
-    idB: Number(_fusEl('fusQB').value),
+    pairs: _fusPairs(_fusEl('fusPairs')),
     sA:  _fusEl('fusSA').value,  tB:  _fusEl('fusTB').value,
     sA2: _fusEl('fusSA2').value, tB2: _fusEl('fusTB2').value,
   };
@@ -3094,6 +3091,87 @@ function _fusionReadout(graph, idA, idB) {
        + ` &and; ${sgn(nas*cbs)}${nap}<sub>${a}</sub>${cbp}<sub>${b}</sub>`;
 }
 
+// ── Fusion pairs ─────────────────────────────────────────────────────────────
+// Several fusions can be queued, each on its own pair of qubits; they share the
+// parity pair and run one after the other. Rows of "Fuse [a] with [b]" live in a
+// container `box`: the first row carries "+" (append a pair), later ones "−".
+function _fusPairFill(box, graph) {
+  const opts = graph.vertices
+    .map(v => `<option value="${v.id}">${escapeHtml(v.label)}</option>`).join('');
+  const sels = [...box.querySelectorAll('select')];
+  const stale = [];
+  for (const sel of sels) {
+    const prev = sel.value;
+    sel.innerHTML = opts;
+    if (graph.vertices.some(v => String(v.id) === prev)) sel.value = prev;
+    else stale.push(sel);
+  }
+  // A picker whose qubit is gone (graph reloaded) takes a qubit no other one
+  // holds, preferring the labels A, B for the first pair.
+  for (const sel of stale) {
+    const held = new Set(sels.filter(o => o !== sel && !stale.includes(o) || o.dataset.set)
+                             .map(o => o.value));
+    const pref = sels.indexOf(sel) < 2
+      ? graph.vertices.find(v => v.label === (sels.indexOf(sel) ? 'B' : 'A')) : null;
+    const pick = (pref && !held.has(String(pref.id))) ? pref
+      : graph.vertices.find(v => !held.has(String(v.id)));
+    if (pick) { sel.value = String(pick.id); sel.dataset.set = '1'; }
+  }
+  stale.forEach(sel => delete sel.dataset.set);
+}
+
+// prefer = [idA, idB] for the first row; later rows default to unused qubits.
+function _fusPairAdd(box, graph, onChange, prefer = []) {
+  const first = !box.children.length;
+  const used = new Set(_fusPairs(box).flatMap(p => [p.idA, p.idB]));
+  const row = document.createElement('div');
+  row.className = 'fus-row fus-pair';
+  row.innerHTML = `Fuse <select data-q="a"></select> with <select data-q="b"></select>
+    <button type="button" class="ghost small fus-pm" title="${first
+      ? 'Queue another fusion, run after the ones above' : 'Remove this fusion'}">${first ? '+' : '&minus;'}</button>`;
+  box.appendChild(row);
+  _fusPairFill(box, graph);
+  const free = graph.vertices.map(v => v.id).filter(id => !used.has(id));
+  const a = prefer[0] ?? free[0];
+  const b = (prefer[1] !== undefined && prefer[1] !== a) ? prefer[1] : free.find(id => id !== a);
+  if (a !== undefined) row.querySelector('[data-q="a"]').value = String(a);
+  if (b !== undefined) row.querySelector('[data-q="b"]').value = String(b);
+  row.querySelectorAll('select').forEach(sel => sel.onchange = onChange);
+  row.querySelector('.fus-pm').onclick = () => {
+    if (first) _fusPairAdd(box, graph, onChange); else row.remove();
+    onChange();
+  };
+}
+
+function _fusPairs(box) {
+  return [...box.querySelectorAll('.fus-pair')].map(r => ({
+    idA: Number(r.querySelector('[data-q="a"]').value),
+    idB: Number(r.querySelector('[data-q="b"]').value),
+  }));
+}
+
+// Why the queued pairs cannot run, or null. Every fused qubit is measured out,
+// so a qubit can take part in one fusion only.
+function _fusPairsError(graph, pairs) {
+  const ids = pairs.flatMap(p => [p.idA, p.idB]);
+  if (ids.some(id => !graph.vertices.some(v => v.id === id))) return 'That qubit is no longer in the graph.';
+  if (pairs.some(p => p.idA === p.idB)) return 'Pick two different qubits.';
+  if (new Set(ids).size < ids.length) return 'A qubit can take part in one fusion only (it is measured out).';
+  return null;
+}
+
+// C_A, C_B and what fusion 1 measures on |G⟩; later fusions act on the state the
+// earlier ones leave, so their readout is not known up front.
+function _fusionDerived(graph, c, cl, err) {
+  if (!cl) return 'P and P&prime; must differ on both qubits '
+               + '(&sigma;<sub>A</sub> &ne; &sigma;&prime;<sub>A</sub>, '
+               + '&tau;<sub>B</sub> &ne; &tau;&prime;<sub>B</sub>) to commute.';
+  if (err) return err;
+  const readout = _fusionReadout(graph, c.pairs[0].idA, c.pairs[0].idB);
+  return `C<sub>A</sub> = ${cl.A.w} &nbsp; C<sub>B</sub> = ${cl.B.w}`
+    + (readout ? `<br>${c.pairs.length > 1 ? 'fusion 1 ' : ''}measures on |G&rang;: ${readout}` : '');
+}
+
 // ── UI ───────────────────────────────────────────────────────────────────────
 function toggleFusionMode() {
   fusionMode = !fusionMode;
@@ -3101,7 +3179,14 @@ function toggleFusionMode() {
   _fusEl('fusionModeBtn').textContent = fusionMode ? '← Exit Fusion' : '⤓ Fusion Mode';
   _fusEl('fusionCard').style.display = fusionMode ? '' : 'none';
   fusion = null;
-  if (fusionMode) { _fusionSetParities(FUSION_TYPES[_fusEl('fusType').value] || FUSION_TYPES.xz_zx); }
+  if (fusionMode) {
+    _fusionSetParities(FUSION_TYPES[_fusEl('fusType').value] || FUSION_TYPES.xz_zx);
+    const box = _fusEl('fusPairs');
+    if (!box.children.length) {
+      const byLabel = l => graphA.vertices.find(v => v.label === l)?.id;
+      _fusPairAdd(box, graphA, fusionEdited, [byLabel('A'), byLabel('B')]);
+    }
+  }
   fusionRefresh();
   toast(fusionMode
     ? 'Fusion mode: pick two qubits and a parity pair, then step through the circuit'
@@ -3135,45 +3220,25 @@ function fusionEdited() {
   fusionRefresh();
 }
 
-function _fusionQubitSelects() {
-  for (const [id, prefer] of [['fusQA', 'A'], ['fusQB', 'B']]) {
-    const sel = _fusEl(id);
-    const prev = sel.value;
-    sel.innerHTML = graphA.vertices
-      .map(v => `<option value="${v.id}">${escapeHtml(v.label)}</option>`).join('');
-    const keep = graphA.vertices.some(v => String(v.id) === prev);
-    if (keep) sel.value = prev;
-    else {
-      const p = graphA.vertices.find(v => v.label === prefer);
-      if (p) sel.value = String(p.id);
-    }
-  }
-}
-
 function fusionRefresh() {
   if (!fusionMode) return;
-  if (!fusion || fusion.idx >= fusion.steps.length) _fusionQubitSelects();
+  if (!fusion || fusion.idx >= fusion.steps.length) _fusPairFill(_fusEl('fusPairs'), graphA);
   const c = _fusionChoice();
   const cl = _fusionCliffords(c);
-  const der = _fusEl('fusDerived');
-  if (!cl) {
-    der.innerHTML = 'P and P&prime; must differ on both qubits '
-                  + '(&sigma;<sub>A</sub> &ne; &sigma;&prime;<sub>A</sub>, '
-                  + '&tau;<sub>B</sub> &ne; &tau;&prime;<sub>B</sub>) to commute.';
-  } else {
-    const readout = _fusionReadout(graphA, c.idA, c.idB);
-    der.innerHTML = `C<sub>A</sub> = ${cl.A.w} &nbsp; C<sub>B</sub> = ${cl.B.w}`
-      + (readout ? `<br>measures on |G&rang;: ${readout}` : '');
-  }
+  const err = _fusPairsError(graphA, c.pairs);
+  if (!fusion) _fusEl('fusDerived').innerHTML = _fusionDerived(graphA, c, cl, err);
   const list = _fusEl('fusSteps');
-  const steps = fusion ? fusion.steps : (cl ? _fusionPlan(graphA, c, cl, _fusionCardOpts()).steps : []);
+  const steps = fusion ? fusion.steps
+    : (cl && !err ? _fusionPlan(graphA, c, cl, _fusionCardOpts()).steps : []);
   const at = fusion ? fusion.idx : 0;
   list.innerHTML = steps.map((st, i) =>
     `<li class="${i < at ? 'done' : (i === at ? 'current' : '')}">${st.label}</li>`).join('');
   const done = fusion && fusion.idx >= fusion.steps.length;
-  _fusEl('fusStepBtn').disabled = !cl || done;
-  _fusEl('fusRunBtn').disabled  = !cl || done;
+  const bad = !fusion && (!cl || err);
+  _fusEl('fusStepBtn').disabled = bad || done;
+  _fusEl('fusRunBtn').disabled  = bad || done;
   _fusEl('fusDesc').innerHTML = !cl ? 'Pick a commuting parity pair.'
+    : bad ? 'Fix the qubit pairs above.'
     : done ? 'Fusion complete &mdash; Reset restores the state it started from.'
     : fusion ? `Step ${fusion.idx + 1} of ${fusion.steps.length}.`
     : 'Step or Run all arms the fusion and snapshots the current state.';
@@ -3190,29 +3255,31 @@ function _fusionCardOpts() {
 // The circuit as a list of operations on `graph`, in the order of thesis §6.2.
 function _fusionPlan(graph, c, cl, opts) {
   const lbl = id => escapeHtml(graph.vertices.find(v => v.id === id)?.label ?? id);
-  const a = lbl(c.idA), b = lbl(c.idB);
   const steps = [];
-  if (cl.A.w !== 'I') steps.push({label: `C<sub>A</sub> = ${cl.A.w} on ${a}`,
-    run: () => graph.applyCliffordU(c.idA, cl.A.U, `C_A = ${cl.A.w}`)});
-  if (cl.B.w !== 'I') steps.push({label: `C<sub>B</sub> = ${cl.B.w} on ${b}`,
-    run: () => graph.applyCliffordU(c.idB, cl.B.U, `C_B = ${cl.B.w}`)});
-  steps.push({label: `CZ(${a}, ${b})`, run: () => graph.doCZ(c.idA, c.idB, 'cz')});
-  steps.push({label: `M<sub>X</sub>(${b})`,
-    run: () => graph.doMeasure('x', {id: c.idB, del: true, inv: opts.invB})});
-  steps.push({label: `M<sub>X</sub>(${a})`,
-    run: () => graph.doMeasure('x', {id: c.idA, del: true, inv: opts.invA})});
+  c.pairs.forEach(({idA, idB}, k) => {
+    const a = lbl(idA), b = lbl(idB);
+    const tag = c.pairs.length > 1 ? `<b>${k + 1}.</b> ` : '';
+    if (cl.A.w !== 'I') steps.push({label: `${tag}C<sub>A</sub> = ${cl.A.w} on ${a}`,
+      run: () => graph.applyCliffordU(idA, cl.A.U, `C_A = ${cl.A.w}`)});
+    if (cl.B.w !== 'I') steps.push({label: `${tag}C<sub>B</sub> = ${cl.B.w} on ${b}`,
+      run: () => graph.applyCliffordU(idB, cl.B.U, `C_B = ${cl.B.w}`)});
+    steps.push({label: `${tag}CZ(${a}, ${b})`, run: () => graph.doCZ(idA, idB, 'cz')});
+    steps.push({label: `${tag}M<sub>X</sub>(${b})`,
+      run: () => graph.doMeasure('x', {id: idB, del: true, inv: opts.invB})});
+    steps.push({label: `${tag}M<sub>X</sub>(${a})`,
+      run: () => graph.doMeasure('x', {id: idA, del: true, inv: opts.invA})});
+  });
   if (opts.canon)
     steps.push({label: 'Canonicalize the frame', run: () => graph.doCanonicalize()});
-  return {idA: c.idA, idB: c.idB, steps, idx: 0};
+  return {pairs: c.pairs, steps, idx: 0};
 }
 
 function _fusionArm() {
   const c = _fusionChoice();
   const cl = _fusionCliffords(c);
   if (!cl) return null;
-  if (c.idA === c.idB) { toast('Pick two different qubits.'); return null; }
-  const gone = [c.idA, c.idB].find(id => !graphA.vertices.some(v => v.id === id));
-  if (gone !== undefined) { toast('That qubit is no longer in the graph.'); fusionRefresh(); return null; }
+  const err = _fusPairsError(graphA, c.pairs);
+  if (err) { toast(err); fusionRefresh(); return null; }
   const plan = _fusionPlan(graphA, c, cl, _fusionCardOpts());
   plan.snapshot = {
     vertices: graphA.vertices.map(v => ({...v, localU: [...(v.localU || CLIFFORD_I)]})),
@@ -3258,8 +3325,6 @@ const _PAULI_OPTS = ['X','Y','Z'].map(p => `<option value="${p}">${p}</option>`)
 function promptFusion(graph) {
   if (graph.busy) return;
   if (graph.vertices.length < 2) { toast('Fusion needs at least two qubits.'); return; }
-  const qOpts = graph.vertices
-    .map(v => `<option value="${v.id}">${escapeHtml(v.label)}</option>`).join('');
   const typeOpts = document.getElementById('fusType').innerHTML;
   const overlay = document.createElement('div');
   overlay.className = 'modal-overlay';
@@ -3268,10 +3333,7 @@ function promptFusion(graph) {
        <h3>Fuse &mdash; Graph ${graph.side.toUpperCase()}</h3>
        <p class="modal-sub">Destructive measurement of P &and; P&prime;:
          C<sub>A</sub>, C<sub>B</sub>, CZ, then M<sub>X</sub> on both qubits.</p>
-       <div class="fus-row">
-         Fuse <select data-k="idA">${qOpts}</select>
-         with <select data-k="idB">${qOpts}</select>
-       </div>
+       <div data-k="pairs"></div>
        <div class="fus-row">Type <select data-k="type">${typeOpts}</select></div>
        <div class="fus-row">
          <span class="fus-parity">P =</span>
@@ -3298,13 +3360,6 @@ function promptFusion(graph) {
   const el = k => overlay.querySelector(`[data-k="${k}"]`);
   const okBtn = overlay.querySelector('.modal-ok');
 
-  // Default A = selected qubit (else the one labelled A), B = another one.
-  const ids = graph.vertices.map(v => v.id);
-  const byLabel = l => graph.vertices.find(v => v.label === l)?.id;
-  const a0 = graph.selectedId ?? byLabel('A') ?? ids[0];
-  const b0 = [byLabel('B'), ...ids].find(id => id !== undefined && id !== a0);
-  el('idA').value = String(a0);
-  el('idB').value = String(b0);
   const setParities = ([sA, tB, sA2, tB2]) => {
     el('sA').value = sA; el('tB').value = tB; el('sA2').value = sA2; el('tB2').value = tB2;
   };
@@ -3312,29 +3367,22 @@ function promptFusion(graph) {
   setParities(FUSION_TYPES.xz_zx);
 
   const choice = () => ({
-    idA: Number(el('idA').value), idB: Number(el('idB').value),
+    pairs: _fusPairs(el('pairs')),
     sA: el('sA').value, tB: el('tB').value, sA2: el('sA2').value, tB2: el('tB2').value,
   });
   const opts = () => ({invA: el('invA').checked, invB: el('invB').checked, canon: el('canon').checked});
   const refresh = () => {
     const c = choice();
     const cl = _fusionCliffords(c);
-    const same = c.idA === c.idB;
-    if (!cl) {
-      el('derived').innerHTML = 'P and P&prime; must differ on both qubits '
-        + '(&sigma;<sub>A</sub> &ne; &sigma;&prime;<sub>A</sub>, '
-        + '&tau;<sub>B</sub> &ne; &tau;&prime;<sub>B</sub>) to commute.';
-    } else if (same) {
-      el('derived').innerHTML = 'Pick two different qubits.';
-    } else {
-      const readout = _fusionReadout(graph, c.idA, c.idB);
-      el('derived').innerHTML = `C<sub>A</sub> = ${cl.A.w} &nbsp; C<sub>B</sub> = ${cl.B.w}`
-        + (readout ? `<br>measures on |G&rang;: ${readout}` : '');
-    }
-    el('steps').innerHTML = (cl && !same)
+    const err = _fusPairsError(graph, c.pairs);
+    el('derived').innerHTML = _fusionDerived(graph, c, cl, err);
+    el('steps').innerHTML = (cl && !err)
       ? _fusionPlan(graph, c, cl, opts()).steps.map(st => `<li>${st.label}</li>`).join('') : '';
-    okBtn.disabled = !cl || same;
+    okBtn.disabled = !cl || !!err;
   };
+  // First pair: A = selected qubit (else the one labelled A), B = the one labelled B.
+  const byLabel = l => graph.vertices.find(v => v.label === l)?.id;
+  _fusPairAdd(el('pairs'), graph, refresh, [graph.selectedId ?? byLabel('A'), byLabel('B')]);
   el('type').onchange = () => {
     const t = FUSION_TYPES[el('type').value];
     if (t) setParities(t);
@@ -3347,25 +3395,25 @@ function promptFusion(graph) {
     el('type').value = hit ? hit[0] : 'custom';
     refresh();
   };
-  for (const k of ['idA', 'idB', 'canon', 'invA', 'invB']) el(k).onchange = refresh;
+  for (const k of ['canon', 'invA', 'invB']) el(k).onchange = refresh;
   refresh();
 
   const close = () => overlay.remove();
   const submit = async () => {
     const c = choice();
     const cl = _fusionCliffords(c);
-    if (!cl || c.idA === c.idB || graph.busy) return;
+    if (!cl || _fusPairsError(graph, c.pairs) || graph.busy) return;
     const plan = _fusionPlan(graph, c, cl, opts());
     close();
     for (const st of plan.steps) await st.run();
     if (graph.side === 'a' && fusionMode) fusionRefresh();
-    toast('Fusion done');
+    toast(c.pairs.length > 1 ? `${c.pairs.length} fusions done` : 'Fusion done');
   };
   okBtn.onclick = submit;
   overlay.querySelector('.modal-cancel').onclick = close;
   overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
   overlay.addEventListener('keydown', e => {
-    if (e.key === 'Enter')       { e.preventDefault(); submit(); }
+    if (e.key === 'Enter' && !e.target.closest('.fus-pm')) { e.preventDefault(); submit(); }
     else if (e.key === 'Escape') { e.preventDefault(); close(); }
   });
   setTimeout(() => okBtn.focus(), 0);

@@ -57,6 +57,7 @@
     .fus-parity { font-family:monospace; font-weight:800; font-size:.92rem; color:#1a2a3a; }
     .fus-derived { font-family:monospace; font-size:.8rem; color:var(--muted); margin:2px 0 6px; }
     .fus-steps { list-style:none; margin:8px 0 0; padding:0; font-size:.8rem; }
+    .fus-modal { width:min(440px,92vw); }
     .fus-steps li { padding:3px 8px; border-left:3px solid #d5e2f0; color:#54657e; }
     .fus-steps li.done    { border-left-color:#2e9e5b; color:#2e9e5b; }
     .fus-steps li.current { border-left-color:#3a86ff; color:#1a2a3a; font-weight:700;
@@ -798,6 +799,7 @@
         <button class="warn small" onclick="graphA.doMeasure('z')">Measure Z</button>
         <button class="warn small" onclick="graphA.doMeasure('y')">Measure Y</button>
         <button class="warn small" onclick="graphA.doMeasure('x')">Measure X</button>
+        <button class="warn small" onclick="promptFusion(graphA)" title="Fuse two qubits of Graph A: pick them and the parity pair, then run the whole circuit.">Fuse&hellip;</button>
       </div>
       <label class="meas-toggle" title="On: remove the measured qubit (standard rule).&#10;Off: keep it, strip its incident edges, and reset it to |+&rangle; for reuse (emitter-style).">
         <input type="checkbox" id="measDelete_a_cmp" checked onchange="syncMeasDelete(this)">
@@ -831,6 +833,7 @@
         <button class="warn small" onclick="graphB.doMeasure('z')">Measure Z</button>
         <button class="warn small" onclick="graphB.doMeasure('y')">Measure Y</button>
         <button class="warn small" onclick="graphB.doMeasure('x')">Measure X</button>
+        <button class="warn small" onclick="promptFusion(graphB)" title="Fuse two qubits of Graph B: pick them and the parity pair, then run the whole circuit.">Fuse&hellip;</button>
       </div>
       <label class="meas-toggle" title="On: remove the measured qubit (standard rule).&#10;Off: keep it, strip its incident edges, and reset it to |+&rangle; for reuse (emitter-style).">
         <input type="checkbox" id="measDelete_b_cmp" checked onchange="syncMeasDelete(this)">
@@ -3075,9 +3078,9 @@ function _fusionCliffords(c) {
 }
 
 // What the circuit will actually measure on |G⟩, signs included (prop. 6.6).
-function _fusionReadout(idA, idB) {
-  const va = graphA.vertices.find(v => v.id === idA);
-  const vb = graphA.vertices.find(v => v.id === idB);
+function _fusionReadout(graph, idA, idB) {
+  const va = graph.vertices.find(v => v.id === idA);
+  const vb = graph.vertices.find(v => v.id === idB);
   if (!va || !vb) return null;
   const dA = _daggerU(va.localU || CLIFFORD_I);       // dual basis: L†ZL, L†XL
   const dB = _daggerU(vb.localU || CLIFFORD_I);
@@ -3158,12 +3161,12 @@ function fusionRefresh() {
                   + '(&sigma;<sub>A</sub> &ne; &sigma;&prime;<sub>A</sub>, '
                   + '&tau;<sub>B</sub> &ne; &tau;&prime;<sub>B</sub>) to commute.';
   } else {
-    const readout = _fusionReadout(c.idA, c.idB);
+    const readout = _fusionReadout(graphA, c.idA, c.idB);
     der.innerHTML = `C<sub>A</sub> = ${cl.A.w} &nbsp; C<sub>B</sub> = ${cl.B.w}`
       + (readout ? `<br>measures on |G&rang;: ${readout}` : '');
   }
   const list = _fusEl('fusSteps');
-  const steps = fusion ? fusion.steps : (cl ? _fusionPlan(c, cl).steps : []);
+  const steps = fusion ? fusion.steps : (cl ? _fusionPlan(graphA, c, cl, _fusionCardOpts()).steps : []);
   const at = fusion ? fusion.idx : 0;
   list.innerHTML = steps.map((st, i) =>
     `<li class="${i < at ? 'done' : (i === at ? 'current' : '')}">${st.label}</li>`).join('');
@@ -3176,22 +3179,30 @@ function fusionRefresh() {
     : 'Step or Run all arms the fusion and snapshots the current state.';
 }
 
-// The circuit as a list of operations, in the order of thesis §6.2.
-function _fusionPlan(c, cl) {
-  const lbl = id => escapeHtml(graphA.vertices.find(v => v.id === id)?.label ?? id);
+// Outcome / canonicalize options as set on the fusion-mode card. Getters, so the
+// outcome switches are read when each measurement runs, not when it is armed.
+function _fusionCardOpts() {
+  return {get invA() { return _fusEl('fusInvA').checked; },
+          get invB() { return _fusEl('fusInvB').checked; },
+          canon: _fusEl('fusCanon').checked};
+}
+
+// The circuit as a list of operations on `graph`, in the order of thesis §6.2.
+function _fusionPlan(graph, c, cl, opts) {
+  const lbl = id => escapeHtml(graph.vertices.find(v => v.id === id)?.label ?? id);
   const a = lbl(c.idA), b = lbl(c.idB);
   const steps = [];
   if (cl.A.w !== 'I') steps.push({label: `C<sub>A</sub> = ${cl.A.w} on ${a}`,
-    run: () => graphA.applyCliffordU(c.idA, cl.A.U, `C_A = ${cl.A.w}`)});
+    run: () => graph.applyCliffordU(c.idA, cl.A.U, `C_A = ${cl.A.w}`)});
   if (cl.B.w !== 'I') steps.push({label: `C<sub>B</sub> = ${cl.B.w} on ${b}`,
-    run: () => graphA.applyCliffordU(c.idB, cl.B.U, `C_B = ${cl.B.w}`)});
-  steps.push({label: `CZ(${a}, ${b})`, run: () => graphA.doCZ(c.idA, c.idB, 'cz')});
+    run: () => graph.applyCliffordU(c.idB, cl.B.U, `C_B = ${cl.B.w}`)});
+  steps.push({label: `CZ(${a}, ${b})`, run: () => graph.doCZ(c.idA, c.idB, 'cz')});
   steps.push({label: `M<sub>X</sub>(${b})`,
-    run: () => graphA.doMeasure('x', {id: c.idB, del: true, inv: _fusEl('fusInvB').checked})});
+    run: () => graph.doMeasure('x', {id: c.idB, del: true, inv: opts.invB})});
   steps.push({label: `M<sub>X</sub>(${a})`,
-    run: () => graphA.doMeasure('x', {id: c.idA, del: true, inv: _fusEl('fusInvA').checked})});
-  if (_fusEl('fusCanon').checked)
-    steps.push({label: 'Canonicalize the frame', run: () => graphA.doCanonicalize()});
+    run: () => graph.doMeasure('x', {id: c.idA, del: true, inv: opts.invA})});
+  if (opts.canon)
+    steps.push({label: 'Canonicalize the frame', run: () => graph.doCanonicalize()});
   return {idA: c.idA, idB: c.idB, steps, idx: 0};
 }
 
@@ -3202,7 +3213,7 @@ function _fusionArm() {
   if (c.idA === c.idB) { toast('Pick two different qubits.'); return null; }
   const gone = [c.idA, c.idB].find(id => !graphA.vertices.some(v => v.id === id));
   if (gone !== undefined) { toast('That qubit is no longer in the graph.'); fusionRefresh(); return null; }
-  const plan = _fusionPlan(c, cl);
+  const plan = _fusionPlan(graphA, c, cl, _fusionCardOpts());
   plan.snapshot = {
     vertices: graphA.vertices.map(v => ({...v, localU: [...(v.localU || CLIFFORD_I)]})),
     edges:    [...graphA.edges].map(k => k.split(',').map(Number)),
@@ -3237,6 +3248,127 @@ function fusionReset() {
   graphA._loadRaw(snap.vertices, snap.edges);
   fusionRefresh();
   toast('Fusion reset — state restored');
+}
+
+// ── Fuse popup (Operations card, either graph) ──────────────────────────────
+// The same circuit as fusion mode, picked in a modal and run in one go on
+// `graph`. Every step goes through the graph's own history, so Undo steps back.
+const _PAULI_OPTS = ['X','Y','Z'].map(p => `<option value="${p}">${p}</option>`).join('');
+
+function promptFusion(graph) {
+  if (graph.busy) return;
+  if (graph.vertices.length < 2) { toast('Fusion needs at least two qubits.'); return; }
+  const qOpts = graph.vertices
+    .map(v => `<option value="${v.id}">${escapeHtml(v.label)}</option>`).join('');
+  const typeOpts = document.getElementById('fusType').innerHTML;
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    `<div class="modal-box fus-modal">
+       <h3>Fuse &mdash; Graph ${graph.side.toUpperCase()}</h3>
+       <p class="modal-sub">Destructive measurement of P &and; P&prime;:
+         C<sub>A</sub>, C<sub>B</sub>, CZ, then M<sub>X</sub> on both qubits.</p>
+       <div class="fus-row">
+         Fuse <select data-k="idA">${qOpts}</select>
+         with <select data-k="idB">${qOpts}</select>
+       </div>
+       <div class="fus-row">Type <select data-k="type">${typeOpts}</select></div>
+       <div class="fus-row">
+         <span class="fus-parity">P =</span>
+         <select data-k="sA">${_PAULI_OPTS}</select><sub>A</sub>
+         <select data-k="tB">${_PAULI_OPTS}</select><sub>B</sub>
+         <span class="fus-parity">&nbsp;&#8743;&nbsp; P&prime; =</span>
+         <select data-k="sA2">${_PAULI_OPTS}</select><sub>A</sub>
+         <select data-k="tB2">${_PAULI_OPTS}</select><sub>B</sub>
+       </div>
+       <p class="fus-derived" data-k="derived"></p>
+       <label class="meas-toggle"><input type="checkbox" data-k="canon" checked>
+         <span class="meas-switch"></span><span>Canonicalize at the end</span></label>
+       <label class="meas-toggle"><input type="checkbox" data-k="invA">
+         <span class="meas-switch"></span><span>M<sub>X</sub>(A) outcome 1</span></label>
+       <label class="meas-toggle"><input type="checkbox" data-k="invB">
+         <span class="meas-switch"></span><span>M<sub>X</sub>(B) outcome 1</span></label>
+       <ol class="fus-steps" data-k="steps"></ol>
+       <div class="modal-btns">
+         <button class="ghost small modal-cancel">Cancel</button>
+         <button class="sec small modal-ok">Run all &#9654;&#9654;</button>
+       </div>
+     </div>`;
+  document.body.appendChild(overlay);
+  const el = k => overlay.querySelector(`[data-k="${k}"]`);
+  const okBtn = overlay.querySelector('.modal-ok');
+
+  // Default A = selected qubit (else the one labelled A), B = another one.
+  const ids = graph.vertices.map(v => v.id);
+  const byLabel = l => graph.vertices.find(v => v.label === l)?.id;
+  const a0 = graph.selectedId ?? byLabel('A') ?? ids[0];
+  const b0 = [byLabel('B'), ...ids].find(id => id !== undefined && id !== a0);
+  el('idA').value = String(a0);
+  el('idB').value = String(b0);
+  const setParities = ([sA, tB, sA2, tB2]) => {
+    el('sA').value = sA; el('tB').value = tB; el('sA2').value = sA2; el('tB2').value = tB2;
+  };
+  el('type').value = 'xz_zx';
+  setParities(FUSION_TYPES.xz_zx);
+
+  const choice = () => ({
+    idA: Number(el('idA').value), idB: Number(el('idB').value),
+    sA: el('sA').value, tB: el('tB').value, sA2: el('sA2').value, tB2: el('tB2').value,
+  });
+  const opts = () => ({invA: el('invA').checked, invB: el('invB').checked, canon: el('canon').checked});
+  const refresh = () => {
+    const c = choice();
+    const cl = _fusionCliffords(c);
+    const same = c.idA === c.idB;
+    if (!cl) {
+      el('derived').innerHTML = 'P and P&prime; must differ on both qubits '
+        + '(&sigma;<sub>A</sub> &ne; &sigma;&prime;<sub>A</sub>, '
+        + '&tau;<sub>B</sub> &ne; &tau;&prime;<sub>B</sub>) to commute.';
+    } else if (same) {
+      el('derived').innerHTML = 'Pick two different qubits.';
+    } else {
+      const readout = _fusionReadout(graph, c.idA, c.idB);
+      el('derived').innerHTML = `C<sub>A</sub> = ${cl.A.w} &nbsp; C<sub>B</sub> = ${cl.B.w}`
+        + (readout ? `<br>measures on |G&rang;: ${readout}` : '');
+    }
+    el('steps').innerHTML = (cl && !same)
+      ? _fusionPlan(graph, c, cl, opts()).steps.map(st => `<li>${st.label}</li>`).join('') : '';
+    okBtn.disabled = !cl || same;
+  };
+  el('type').onchange = () => {
+    const t = FUSION_TYPES[el('type').value];
+    if (t) setParities(t);
+    refresh();
+  };
+  for (const k of ['sA', 'tB', 'sA2', 'tB2']) el(k).onchange = () => {
+    const c = choice();
+    const hit = Object.entries(FUSION_TYPES).find(([, t]) =>
+      t[0] === c.sA && t[1] === c.tB && t[2] === c.sA2 && t[3] === c.tB2);
+    el('type').value = hit ? hit[0] : 'custom';
+    refresh();
+  };
+  for (const k of ['idA', 'idB', 'canon', 'invA', 'invB']) el(k).onchange = refresh;
+  refresh();
+
+  const close = () => overlay.remove();
+  const submit = async () => {
+    const c = choice();
+    const cl = _fusionCliffords(c);
+    if (!cl || c.idA === c.idB || graph.busy) return;
+    const plan = _fusionPlan(graph, c, cl, opts());
+    close();
+    for (const st of plan.steps) await st.run();
+    if (graph.side === 'a' && fusionMode) fusionRefresh();
+    toast('Fusion done');
+  };
+  okBtn.onclick = submit;
+  overlay.querySelector('.modal-cancel').onclick = close;
+  overlay.addEventListener('mousedown', e => { if (e.target === overlay) close(); });
+  overlay.addEventListener('keydown', e => {
+    if (e.key === 'Enter')       { e.preventDefault(); submit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  });
+  setTimeout(() => okBtn.focus(), 0);
 }
 
 // ─── View modes ──────────────────────────────────────────────────────────────

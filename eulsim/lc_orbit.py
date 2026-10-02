@@ -6,6 +6,7 @@ Graphs are adjacency sets; the hashable orbit key is the sorted edge tuple
 from __future__ import annotations
 
 from .graph_ops import local_complement
+from .iso import canonical_labelling
 
 # ─── LC-equivalence ───────────────────────────────────────────────────────────
 
@@ -15,8 +16,7 @@ NODE_LIMIT = 20
 
 def _edge_key(adj, n):
     """Canonical edge-set key: sorted tuple of (i,j) pairs with i<j.
-    Its length is the edge count, so (len(key), key) is the
-    fewest-edges-then-lexicographic order used by lc_canonical."""
+    Its length is the edge count, the first key of lc_canonical's order."""
     return tuple(sorted((i, j) for i in range(n) for j in adj[i] if i < j))
 
 
@@ -54,9 +54,38 @@ def lc_equiv_labeled(adj1, n, adj2, *, max_bfs=None, node_limit=None):
     return False, len(visited), f"Not LC-equivalent (full orbit: {len(visited)} graphs)"
 
 
+def _tie_break(mins, n):
+    """Pick among the fewest-edge orbit members by isomorphism class first.
+
+    The key is (canonical form, labelled edge key): the canonical form depends
+    only on the shape, so relabelling the input graph cannot change which shape
+    wins; the labelled key then picks one concrete member of that shape.
+    Returns (adj, shapes, ok) — ok is False when an IR search ran out of budget
+    and the choice fell back to the labelled order alone."""
+    if len(mins) == 1:
+        return mins[0], 1, True
+    keyed = []
+    for a in mins:
+        cert, _, _, capped = canonical_labelling(a, n)
+        if capped:
+            return min(mins, key=lambda b: _edge_key(b, n)), None, False
+        keyed.append((cert, _edge_key(a, n), a))
+    keyed.sort(key=lambda t: t[:2])
+    return keyed[0][2], len({t[0] for t in keyed}), True
+
+
 def lc_canonical(adj, n, *, max_bfs=None, node_limit=None):
-    """Return the LC-orbit representative with fewest edges (ties broken lexicographically
-    by sorted edge list). Returns (rep_adj, orbit_size, capped, msg)."""
+    """Return the LC-orbit representative: fewest edges, ties broken by the
+    canonical form of the graph (iso.canonical_labelling), then by the sorted
+    labelled edge list. Returns (rep_adj, orbit_size, capped, msg).
+
+    Breaking ties by canonical form makes the choice invariant under relabelling
+    the qubits: rep(pi(G)) is isomorphic to rep(G) for every permutation pi, and
+    (edge count, canonical form) of the representative is a complete invariant
+    for LC-equivalence up to relabelling. A plain lexicographic tie-break is not
+    — from 7 qubits on an orbit can hold fewest-edge graphs of different shapes,
+    and which one sorts first then depends on the labels (LC_isomorph.tex, §5).
+    Not guaranteed when the BFS is capped: a partial orbit may miss the minimum."""
     cap  = max_bfs    if max_bfs    is not None else MAX_BFS_STATES
     nlim = node_limit if node_limit is not None else NODE_LIMIT
     if n == 0:
@@ -68,8 +97,8 @@ def lc_canonical(adj, n, *, max_bfs=None, node_limit=None):
     visited = {start}
     queue = [adj]
     capped = False
-    best_adj = adj
-    best_key = (len(start), start)
+    best_m = len(start)
+    mins = [adj]          # every orbit member seen with best_m edges
 
     while queue:
         if len(visited) >= cap:
@@ -82,12 +111,19 @@ def lc_canonical(adj, n, *, max_bfs=None, node_limit=None):
             if h not in visited:
                 visited.add(h)
                 queue.append(new_adj)
-                k = (len(h), h)
-                if k < best_key:
-                    best_adj, best_key = new_adj, k
+                if len(h) < best_m:
+                    best_m, mins = len(h), [new_adj]
+                elif len(h) == best_m:
+                    mins.append(new_adj)
 
+    best_adj, shapes, ok = _tie_break(mins, n)
     sz  = len(visited)
-    msg = f"Representative found (orbit {'≥' if capped else '='} {sz} graphs)"
+    msg = f"Representative found (orbit {'≥' if capped else '='} {sz} graphs"
+    if shapes and shapes > 1:
+        msg += f"; {shapes} fewest-edge shapes, tie broken by canonical form"
+    if not ok:
+        msg += "; isomorphism budget hit, tie broken by labels — not relabel-invariant"
+    msg += ")"
     return best_adj, sz, capped, msg
 
 

@@ -109,7 +109,9 @@ Per-qubit operations, all applied by clicking a vertex:
 Live panels: graph properties and adjacency matrix, stabilizer generators
 `S_v = X_v ⊗ Z_N(v)`, supplementary and Eulerian vectors, dense state vector
 (up to 10 qubits), and LC-orbit tools (canonical representative, orbit size,
-equivalence between A and B). Presets cover the usual suspects — Bell, GHZ,
+equivalence between A and B). The representative has the fewest edges in the
+orbit, with ties broken by isomorphism class, so relabelling the qubits gives
+an isomorphic representative. Presets cover the usual suspects — Bell, GHZ,
 linear cluster, ring, complete graph — plus the repeater graph states and the
 all-photonic and fusion constructions.
 

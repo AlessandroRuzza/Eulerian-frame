@@ -406,7 +406,7 @@
       <div class="title-row">
         <h2>Graph Editor <span id="graphALabel">A</span></h2>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <span id="lcSpinA" class="lc-spinner"></span><button class="ghost small" onclick="graphA.doLCRep()">&#8595; LC rep</button><button class="ghost small" style="margin-left:4px" onclick="graphA.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph</button>
+          <span id="lcSpinA" class="lc-spinner"></span><button class="ghost small" onclick="graphA.doLCRep()">&#8595; LC rep</button><button class="ghost small" style="margin-left:4px" onclick="graphA.doLCRep(true)" title="Representative of the class under LC and renaming of the qubits: the same graph for every member of the class. It is LC-equivalent to a relabelling of this graph, not to the graph itself.">&#8595; LC+iso rep</button><button class="ghost small" style="margin-left:4px" onclick="graphA.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph</button>
           <button class="ghost small" onclick="graphA.doCanonicalize()">Canonicalize</button>
           <label class="cgate-pick" title="2-qubit gate applied when you click two qubits">2-qubit:
             <select id="cgateSel_a" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
@@ -610,7 +610,7 @@
       <div class="title-row">
         <h2>Graph Editor B</h2>
         <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-          <span id="lcSpinB" class="lc-spinner"></span><button class="ghost small" onclick="graphB.doLCRep()">&#8595; LC rep</button><button class="ghost small" style="margin-left:4px" onclick="graphB.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph</button>
+          <span id="lcSpinB" class="lc-spinner"></span><button class="ghost small" onclick="graphB.doLCRep()">&#8595; LC rep</button><button class="ghost small" style="margin-left:4px" onclick="graphB.doLCRep(true)" title="Representative of the class under LC and renaming of the qubits: the same graph for every member of the class. It is LC-equivalent to a relabelling of this graph, not to the graph itself.">&#8595; LC+iso rep</button><button class="ghost small" style="margin-left:4px" onclick="graphB.doGraphState()" title="Set the frame to (Z, X) on every qubit — the plain graph state of this graph. Edges are untouched.">&#8595; Graph</button>
           <button class="ghost small" onclick="graphB.doCanonicalize()">Canonicalize</button>
           <label class="cgate-pick" title="2-qubit gate applied when you click two qubits">2-qubit:
             <select id="cgateSel_b" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
@@ -2097,7 +2097,7 @@ class GraphState {
     }
   }
 
-  async doLCRep() {
+  async doLCRep(iso = false) {
     if (this.busy) return;
     const {n, edges, labels} = this.getAdjData();
     if (n === 0) { toast('No qubits.'); return; }
@@ -2108,7 +2108,7 @@ class GraphState {
     const spinner = document.getElementById(`lcSpin${this.side.toUpperCase()}`);
     if (spinner) spinner.classList.add('active');
     try {
-      const res = await fetch('/api/lc_canonical', {
+      const res = await fetch(iso ? '/api/lc_iso_canonical' : '/api/lc_canonical', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({
           graph: {n, edges, labels},
@@ -2129,7 +2129,7 @@ class GraphState {
       this.draw();
       this.fetchCompute();
       if (comparisonMode) checkLCEquiv();
-      toast(`LC rep (${data.edges.length} edge${data.edges.length!==1?'s':''}): ${data.msg}`);
+      toast(`${iso ? 'LC+iso rep' : 'LC rep'} (${data.edges.length} edge${data.edges.length!==1?'s':''}): ${data.msg}`);
     } catch(e) {
       toast(`Error: ${e.message}`);
     } finally {

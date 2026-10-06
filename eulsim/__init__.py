@@ -47,6 +47,7 @@ from .lc_orbit import (
     MAX_BFS_STATES,
     NODE_LIMIT,
     lc_canonical,
+    lc_iso_canonical,
     lc_equiv_labeled,
     lc_orbit_size,
 )
@@ -63,5 +64,5 @@ __all__ = [
     "compute_stabilizers", "canonicalize", "canonicalize_rref",
     "apply_cz", "apply_controlled",
     "compute_state_vector", "compute_properties",
-    "lc_equiv_labeled", "lc_canonical", "lc_orbit_size",
+    "lc_equiv_labeled", "lc_canonical", "lc_iso_canonical", "lc_orbit_size",
 ]

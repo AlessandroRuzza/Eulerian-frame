@@ -24,6 +24,7 @@ from .lc_orbit import (
     MAX_BFS_STATES,
     NODE_LIMIT,
     lc_canonical,
+    lc_iso_canonical,
     lc_equiv_labeled,
     lc_orbit_size,
 )
@@ -209,6 +210,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json({"n": n, "labels": labels,
                             "edges": edges, "orbit_size": sz,
                             "capped": capped, "msg": msg})
+            elif path == "/api/lc_iso_canonical":
+                g = body.get("graph", {})
+                adj, n, labels = self._parse_graph(g)
+                req_max_bfs    = int(body.get("max_bfs_states", MAX_BFS_STATES))
+                req_node_limit = int(body.get("node_limit",    NODE_LIMIT))
+                rep, sz, capped, exact, msg = lc_iso_canonical(
+                    adj, n, max_bfs=req_max_bfs, node_limit=req_node_limit)
+                edges = edge_list(rep, n)
+                self._json({"n": n, "labels": labels,
+                            "edges": edges, "orbit_size": sz,
+                            "capped": capped, "exact": exact, "msg": msg})
             elif path == "/api/lc_equiv":
                 ga = body.get("graph_a", {})
                 gb = body.get("graph_b", {})

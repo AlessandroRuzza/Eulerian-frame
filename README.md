@@ -133,6 +133,7 @@ so each request carries the whole graph and gets the whole updated state back.
 | `POST /api/canonicalize` | canonical frame, plus the residual corrections that would collapse it to a bare graph state |
 | `POST /api/state_equal` | are A and B the same physical state? |
 | `POST /api/lc_canonical` | LC-orbit representative and orbit size |
+| `POST /api/lc_iso_canonical` | representative of the class under LC and renaming of the qubits, in canonical labels |
 | `POST /api/lc_equiv` | are A and B LC-equivalent as labelled graphs? |
 | `POST /api/iso` | are A and B isomorphic (equal up to renaming the qubits)? `max_qubits` caps the search |
 | `GET /health` | `{"ok": true}` |

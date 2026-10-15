@@ -25,7 +25,6 @@ from ..cliffords import (
     _mat2x2_mul,
 )
 from ..frames import PAIR_TO_MAT, pair_from_mat
-from ..gates import _apply_cz_tableau
 from ..graph_ops import lc_inplace, set_edge, toggle_edge
 from .tables import (
     DAG_ID,
@@ -56,6 +55,7 @@ from .tables import (
     ZFOLD_KEY,
     ZSET_ID,
     ZSET_KEYS,
+    _apply_cz_tableau,
     cz_tables,
     frame_rank,
     mat_cz_lookup,

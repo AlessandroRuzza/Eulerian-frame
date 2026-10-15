@@ -18,12 +18,11 @@ register size stays fixed along a stream.
 from __future__ import annotations
 
 from .frames import (
-    DAG,
-    DECOMP,
     ID_PAIR,
     IPROD,
     LC_CENTER,
     LC_NEIGH,
+    LGATE,
     PAIR_TO_MAT,
     PEND_HSH,
     PEND_SDG,
@@ -31,8 +30,9 @@ from .frames import (
     RV_NEIGH,
     ZFOLD,
 )
-from .gates import _apply_cz_tableau, build_cz_table
-from .graph_ops import lc_inplace, set_edge, toggle_edge
+from .graph_ops import lc_inplace, toggle_edge
+
+LZ = LGATE["Z"]
 
 
 class EulerSim:
@@ -43,7 +43,7 @@ class EulerSim:
     def __init__(self, adj: list[set], pair_codes: list[int]):
         self.adj = [set(s) for s in adj]
         self.f = list(pair_codes)
-        self.n_diag = self.n_table = self.n_fallback = 0
+        self.n_toggle = self.n_degenerate = 0
 
     # -- single-qubit physical gate (left composition) --
     def apply_local(self, v: int, table: list) -> None:
@@ -99,61 +99,49 @@ class EulerSim:
         adj[v].clear()
         f[v] = ID_PAIR
 
-    # -- CZ: the local Anders-Briegel algorithm --
-    def _reduce_vop_at(self, a: int, avoid: int) -> None:
-        word = DECOMP[DAG[self.f[a]]]
-        if not word:
-            return
-        adj, f = self.adj, self.f
-        for mv in word:
-            if mv == "X":
-                self._lc_step(a)
-            else:
-                nb = [j for j in adj[a] if j != avoid] or list(adj[a])
-                if not nb:
-                    break
-                b = min(nb, key=lambda j: (f[j] == ID_PAIR, j))
-                self._lc_step(b)
+    # -- CZ: the Eulerian-frame rule (gates.apply_cz) --
+    def _zalign(self, a: int, other: int, may_use_other: bool) -> bool:
+        f, adj = self.f, self.adj
+        if f[a] % 6 in (2, 5):                           # w^N_a on the Z axis
+            return True
+        if (f[a] // 6) % 3 == 2:                         # w^C_a on the Z axis
+            nb = [u for u in adj[a] if u != other]
+            if not nb and may_use_other and other in adj[a]:
+                nb = [other]
+            if not nb:
+                return False
+            self._lc_step(min(nb, key=lambda u: (len(adj[u]), u)))
+        self._lc_step(a)
+        return True
+
+    def _cz_degenerate(self, i: int, j: int, stuck: int) -> None:
+        f = self.f
+        other = j if stuck == i else i
+        neg = f[stuck] // 18 == 1                        # sign of w^C_stuck
+        if self.adj[stuck]:                              # N(stuck) = {other}
+            neg ^= f[other] % 6 == 5
+            if not neg:                                  # +Z_iZ_j: CZ = Z_i
+                f[i] = LZ[f[i]]
+        elif neg:                                        # -Z_stuck
+            f[other] = LZ[f[other]]
 
     def cz(self, i: int, j: int) -> None:
-        adj, f = self.adj, self.f
-
-        def has_others(a: int, b: int) -> bool:
-            return any(k != b for k in adj[a])
-
-        both_zaxis = (f[i] % 6) % 3 == 2 and (f[j] % 6) % 3 == 2
-
-        def commutes(a: int) -> bool:
-            return both_zaxis or f[a] % 6 == 2           # Z-set: w^N = +Z
-
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-        if has_others(j, i) and not commutes(j):
-            self._reduce_vop_at(j, avoid=i)
-        if has_others(i, j) and not commutes(i):
-            self._reduce_vop_at(i, avoid=j)
-
+        if not self._zalign(i, j, True):
+            self.n_degenerate += 1
+            self._cz_degenerate(i, j, i)
+            return
+        if not self._zalign(j, i, False):
+            self.n_degenerate += 1
+            self._cz_degenerate(i, j, j)
+            return
+        self.n_toggle += 1
+        f = self.f
+        toggle_edge(self.adj, i, j)
         wni, wnj = f[i] % 6, f[j] % 6
-        if wni % 3 == 2 and wnj % 3 == 2:                # diagonal-axis case
-            self.n_diag += 1
-            toggle_edge(adj, i, j)
-            if wni == 5:                                 # w^N_i = -Z
-                f[j] = ZFOLD[f[j]]
-            if wnj == 5:
-                f[i] = ZFOLD[f[i]]
-            return
-        res = build_cz_table().get((1 if j in adj[i] else 0, f[i], f[j],
-                                    has_others(i, j), has_others(j, i)))
-        if res is None:                                  # defensive fallback
-            self.n_fallback += 1
-            new_adj, new_f = _apply_cz_tableau(adj, len(adj), i, j, f)
-            self.adj = new_adj
-            self.f = new_f
-            return
-        self.n_table += 1
-        zeta2, pa2, pb2 = res
-        set_edge(adj, i, j, zeta2)
-        f[i], f[j] = pa2, pb2
+        if wni == 5:                                     # w^N_i = -Z
+            f[j] = ZFOLD[f[j]]
+        if wnj == 5:
+            f[i] = ZFOLD[f[i]]
 
     def pair_codes(self) -> list[int]:
         return list(self.f)

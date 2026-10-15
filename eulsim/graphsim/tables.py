@@ -6,8 +6,8 @@ id 0..23.  Every table is produced by running the matrix operation once per
 Clifford and memoising the result, so all three backends are correct by
 construction from the same toolkit.
 
-The coupled CZ block table is *not* rebuilt: it is re-indexed from the core's
-``gates.build_cz_table`` so the physics has exactly one source.
+The coupled CZ block table (``build_cz_table``) is GraphSim's own rule and
+lives here: the Eulerian core applies CZ by re-framing, with no table.
 """
 from __future__ import annotations
 
@@ -23,7 +23,10 @@ from ..cliffords import (
     _dag_u8,
     _mat2x2_mul,
 )
-from ..frames import DECOMP, GATE_U8, PAIR_TO_MAT, VALID_PAIRS, pair_from_mat
+from ..frames import (
+    DECOMP, GATE_U8, PAIR_TO_MAT, VALID_PAIRS, in_zset, pair_from_mat,
+)
+from ..tableau import _PAULI_MUL, _reduce_tableau, _tableau_from_state
 
 # ── Storage 1: the phase-canonical Clifford key ───────────────────────────────
 
@@ -102,18 +105,119 @@ ZSET_ID = [_clifford_key(m) in ZSET_KEYS for m in ID_MAT]
 VOPDECOMP_ID = [VOP_DECOMP[k] for k in KEY_TO_MAT]
 
 
-# ── The coupled CZ block, re-indexed from the core table ──────────────────────
+# ── The coupled two-qubit CZ block (the 2·24² table of Anders-Briegel) ────────
+# When an operand's frame cannot be reduced away (its only neighbour is the
+# other operand), the two operand frames are coupled and the transition
+# function is genuinely table-shaped (notes-EulVec-Rep-Operations, Remark 2).
+# GraphSim's rule, kept here for the GraphSim baselines only: the Eulerian
+# core (``gates.apply_cz``) needs no table.
+# The table is brute-forced once on two-qubit stabilizer states, keyed by
+# frame codes, and cached for the life of the process.
+
+_CZTAB: dict | None = None
+
+
+def _state_key_2q(psi) -> tuple:
+    """Phase-canonical key for a two-qubit state vector."""
+    idx = next(k for k in range(4) if abs(psi[k]) > 1e-8)
+    psi = psi * (abs(psi[idx]) / psi[idx])
+    return tuple(round(x, 6) + 0.0 for c in psi for x in (c.real, c.imag))
+
+
+def build_cz_table() -> dict:
+    """Enumerate every framed two-qubit representative (ζ, L_a, L_b) ↦ state
+    (L_a ⊗ L_b)·CZ^ζ|++⟩, then read off the transition
+
+        CZ·(L_a⊗L_b)·CZ^ζ|++⟩ ∝ (L'_a⊗L'_b)·CZ^{ζ'}|++⟩.
+
+    Among the sign-redundant representatives it keeps, per the paper's
+    Constraint 1, an output with w^N = +Z (frame in the Z-set {I,Z,S,S†}) on
+    each operand that still carries external CZ edges, so the new frame
+    commutes back through those edges — hence the (need_a, need_b) key.
+    Entries with no such representative are simply absent; the GraphSim
+    backends then fall back to the tableau route.
+
+    Several representatives usually qualify.  The tie is broken by
+    (ζ', phase-canonical key of L'_a, phase-canonical key of L'_b), which is
+    an arbitrary but *fixed* rule: any winner describes the same physical
+    state, and pinning it keeps the frame this simulator reports — and the
+    diagonal/table path split the benchmarks measure — reproducible.
+
+    Returns {(ζ, code_a, code_b, need_a, need_b): (ζ', code_a', code_b')}."""
+    global _CZTAB
+    if _CZTAB is not None:
+        return _CZTAB
+    import numpy as np
+
+    def u8_to_np(m):
+        return np.array([[complex(m[0], m[1]), complex(m[2], m[3])],
+                         [complex(m[4], m[5]), complex(m[6], m[7])]])
+
+    plus = np.full(4, 0.5, dtype=complex)
+    czm = np.diag([1, 1, 1, -1]).astype(complex)
+    mats = {c: u8_to_np(PAIR_TO_MAT[c]) for c in VALID_PAIRS}
+
+    ckey = {c: _clifford_key(PAIR_TO_MAT[c]) for c in VALID_PAIRS}
+
+    states: dict[tuple, list] = {}
+    prepared: dict = {}
+    for zeta in (0, 1):
+        base = czm @ plus if zeta else plus
+        for ca in VALID_PAIRS:
+            for cb in VALID_PAIRS:
+                psi = np.kron(mats[ca], mats[cb]) @ base
+                prepared[(zeta, ca, cb)] = psi
+                states.setdefault(_state_key_2q(psi), []).append((zeta, ca, cb))
+
+    tab: dict = {}
+    for (zeta, ca, cb), psi in prepared.items():
+        cands = states.get(_state_key_2q(czm @ psi), [])
+        for na in (False, True):
+            for nb in (False, True):
+                best = None
+                for z2, ca2, cb2 in cands:
+                    if (na and not in_zset(ca2)) or (nb and not in_zset(cb2)):
+                        continue
+                    entry = (z2, ckey[ca2], ckey[cb2], ca2, cb2)
+                    if best is None or entry < best:
+                        best = entry
+                if best is not None:
+                    tab[(zeta, ca, cb, na, nb)] = (best[0], best[3], best[4])
+    _CZTAB = tab
+    return tab
+
+
+def _apply_cz_tableau(adj: list[set[int]], n: int, i: int, j: int,
+                      f: list[int]) -> tuple[list[set[int]], list[int]]:
+    """Fallback CZ path: conjugate the stabilizer tableau by CZ_ij
+    (X_i↦X_iZ_j, Y_i↦Y_iZ_j, Z_i↦Z_i, symmetric in j), then reduce globally."""
+    tab = _tableau_from_state(adj, n, f)
+    for g in tab:                                # conjugate each generator by CZ_ij
+        L = g[1]
+        ai = L[i] in ("X", "Y")                  # i has X-component
+        aj = L[j] in ("X", "Y")
+        k = 0
+        if aj:                                   # → append Z on qubit i: L[i]·Z
+            kk, r = _PAULI_MUL[(L[i], "Z")]; k += kk; L[i] = r
+        if ai:                                   # → append Z on qubit j: Z·L[j]
+            kk, r = _PAULI_MUL[("Z", L[j])]; k += kk; L[j] = r
+        if k % 4 == 2:
+            g[0] = -g[0]
+    new_adj, new_f, _ = _reduce_tableau(tab, n)
+    return new_adj, new_f
+
+
+# ── The coupled CZ block, re-indexed by key and by id ──────────────────────
 
 _CZ_KEY: dict | None = None
 _CZ_ID: dict | None = None
 
 
 def cz_tables() -> tuple[dict, dict]:
-    """The core's pair-keyed CZ block table, re-indexed by Clifford key and by
+    """The pair-keyed CZ block table, re-indexed by Clifford key and by
     opaque id.  Built once, on first use."""
     global _CZ_KEY, _CZ_ID
     if _CZ_KEY is None:
-        from ..gates import build_cz_table
         k_of = {c: _clifford_key(PAIR_TO_MAT[c]) for c in VALID_PAIRS}
         _CZ_KEY, _CZ_ID = {}, {}
         for (z, ca, cb, na, nb), (z2, ca2, cb2) in build_cz_table().items():

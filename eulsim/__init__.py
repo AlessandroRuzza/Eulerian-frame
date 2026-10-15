@@ -10,7 +10,8 @@ Concepts
 * Local complementation tau_v and the state-preserving re-framing move
   R_v: (G, L) -> (tau_v(G), L*U_v_dag) of the Eulerian-vector calculus
 * Pauli measurements via the reduction chain X -> Y -> Z
-* CZ/CX/CY by the local Anders-Briegel algorithm (quant-ph/0504117)
+* CZ/CX/CY by the Eulerian-frame rule: re-frame to the Z axis, then edge
+  toggle, or a Pauli in the degenerate case (no look-up table)
 * LC-equivalence check via BFS over the LC orbit
 * Canonical frame (tensor) H^f S^d Z^s |G'>, shortlex-least Hadamard support,
   computed with re-framings and pivots on the frame itself
@@ -23,7 +24,7 @@ graph_ops    local complementation, re-framing move, Pauli measurement
 tableau      stabilizer tableau: generators, reduction to graph form
 framecanon   canonical frame by re-framing only (R_v, pivots)
 canonical    canonical frame API + check-matrix cross-check
-gates        CZ/CX/CY application (local algorithm + coupled block table)
+gates        CZ/CX/CY application (Eulerian-frame rule, no table)
 statevector  dense state-vector expansion (display)
 properties   graph-theoretic properties/tags
 lc_orbit     LC-orbit BFS: equivalence, representative, orbit size

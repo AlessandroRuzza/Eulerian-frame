@@ -140,8 +140,8 @@ def build_cz_table() -> dict:
     Several representatives usually qualify.  The tie is broken by
     (ζ', phase-canonical key of L'_a, phase-canonical key of L'_b), which is
     an arbitrary but *fixed* rule: any winner describes the same physical
-    state, and pinning it keeps the frame this simulator reports — and the
-    diagonal/table path split the benchmarks measure — reproducible.
+    state, and pinning it keeps the frames the GraphSim backends report —
+    and their diagonal/table path split — reproducible.
 
     Returns {(ζ, code_a, code_b, need_a, need_b): (ζ', code_a', code_b')}."""
     global _CZTAB

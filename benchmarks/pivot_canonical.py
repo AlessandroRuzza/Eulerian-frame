@@ -430,7 +430,7 @@ def op_clifford(adj, L, rng):
 
 
 def op_cz(adj, L, rng, neighbour: bool, pair=None):
-    """Physical CZ via the local Anders-Briegel algorithm of eulsim.gates."""
+    """Physical CZ via the Eulerian-frame rule of eulsim.gates."""
     n = len(L)
     if pair is not None:
         i, j = pair

@@ -68,16 +68,16 @@ integer rules are machine-checked against the matrix semantics:
     dagger (basis transport):                  code -> DAG_PAIR[code]
     measurement transport L^dag P L:           direct read of the pair
     CZ case split (w^N on the Z axis?):        code % 6 in {2, 5}
-    VOP decomposition word:                    DECOMP_PAIR[DAG_PAIR[code]]
-    coupled CZ block:                          dict keyed by small ints
+    CZ alignment (w^C on the Z axis?):         code // 6 % 3 == 2
 
 Operations benchmarked (the calculus of the papers/notes):
     single   physical single-qubit Clifford (left frame composition)
     reframe  re-framing move R_v: (G,L) -> (tau_v(G), L.U_v^dag)
     measure  Pauli measurement via the reduction chain X -> Y -> Z
              (mirrors eulsim.graph_ops.do_measure, delete=False)
-    cz       physical CZ by the local Anders-Briegel algorithm
-             (mirrors eulsim.gates.apply_cz)
+    cz       physical CZ: the Eulerian-frame rule for "euler" (mirrors
+             eulsim.gates.apply_cz, no table); the local Anders-Briegel
+             algorithm with its coupled-block table for the VOP baselines
     mixed    weighted mix of the above
 
 Usage:
@@ -113,14 +113,15 @@ from eulsim.sim import EulerSim      # noqa: E402
 # All four live in the package now, not in this file: the Eulerian candidate
 # is eulsim.sim.EulerSim (the in-place mirror of the functional core), and
 # the three VOP-storage baselines are eulsim.graphsim.  They share the graph
-# layer, the coupled CZ block table and the tableau fallback, so what differs
-# between them is exactly the frame representation.  The pair rule tables
+# layer.  The baselines also share GraphSim's CZ (coupled block table plus
+# tableau fallback), so among them only the frame representation differs;
+# "euler" applies CZ by the Eulerian-frame rule instead, with no table.  The pair rule tables
 # themselves (eulsim.frames) are derived from the matrix toolkit at import
 # and machine-checked against it over all 24 Cliffords.
 
 
 def init_cz_tables() -> float:
-    """Warm the coupled two-qubit block table for every backend before any
+    """Warm the coupled two-qubit block table of the VOP baselines before any
     timing starts, so the one-time build never lands inside a measured op.
     Returns the seconds it took."""
     t0 = time.perf_counter()
@@ -254,8 +255,13 @@ class ModuleRef:
 
 
 def selftest(seeds: int = 4) -> None:
+    """Op by op on random streams: the three VOP baselines must agree exactly
+    (same algorithm, different storage), and EulerSim must agree exactly with
+    the functional eulsim module.  The two groups apply CZ by different
+    rules, so their frames may differ; each group is checked on its own."""
     init_cz_tables()
     print("rule tables: derived and verified against the matrix toolkit (24/24)")
+    vop = [name for name in SIM_CLASSES if name != "euler"]
     for seed in range(seeds):
         rng = Random(seed)
         n = 8 if seed % 2 == 0 else 24
@@ -277,15 +283,17 @@ def selftest(seeds: int = 4) -> None:
             else:
                 r.cz(op[1], op[2])
             ctx = f"seed={seed} step={t} op={op}"
-            adjs = [sim.adj for sim in sims.values()] + [r.adj_sets()]
-            assert all(a == adjs[0] for a in adjs), f"adjacency mismatch: {ctx}"
-            codes_now = [sim.pair_codes() for sim in sims.values()] + [r.pair_codes()]
-            assert all(c == codes_now[0] for c in codes_now), f"frame mismatch: {ctx}"
-        b = sims["euler"]
+            for group in ([sims[b] for b in vop], [sims["euler"], r]):
+                adjs = [x.adj if x is not r else x.adj_sets() for x in group]
+                assert all(a == adjs[0] for a in adjs), f"adjacency mismatch: {ctx}"
+                codes_now = [x.pair_codes() for x in group]
+                assert all(c == codes_now[0] for c in codes_now), f"frame mismatch: {ctx}"
+        b, g = sims["euler"], sims[vop[0]]
         print(f"  seed {seed}: n={n}, {len(ops)} mixed ops -- "
-              f"clifford == cliffordlut == euler == eulsim module "
-              f"(cz paths: diag={b.n_diag} table={b.n_table} "
-              f"fallback={b.n_fallback})")
+              f"{' == '.join(vop)}; euler == eulsim module "
+              f"(euler cz: toggle={b.n_toggle} degenerate={b.n_degenerate}; "
+              f"vop cz: diag={g.n_diag} table={g.n_table} "
+              f"fallback={g.n_fallback})")
     print("selftest OK")
 
 
@@ -465,7 +473,7 @@ def run_benchmarks(sizes: list[int], degrees: list[float], degree: float,
     build_t = init_cz_tables()
     _T_OVERHEAD = _timer_overhead()
     print(f"coupled-CZ tables built in {build_t:.2f}s "
-          f"(one-time, all backends, excluded from timings)")
+          f"(one-time, VOP baselines only, excluded from timings)")
     print(f"timer overhead {_T_OVERHEAD * 1e9:.0f} ns per timed region, "
           f"subtracted; mean of {reps} repetitions")
     print("warm-up: " + ("sign folds R_v^2, graph-preserving -- the measured"

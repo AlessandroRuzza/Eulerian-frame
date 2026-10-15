@@ -171,7 +171,7 @@ eulsim/
   tableau.py          stabilizer tableau: generators, reduction, UI report
   framecanon.py       canonical frame by re-framing only (R_v, pivots)
   canonical.py        canonical frame API + check-matrix cross-check
-  gates.py            CZ/CX/CY: local Anders-Briegel algorithm + block table
+  gates.py            CZ/CX/CY: Eulerian-frame rule (re-framing, no table)
   statevector.py      dense state-vector expansion (display)
   properties.py       graph-theoretic properties/tags
   lc_orbit.py         LC-orbit BFS: equivalence, representative, orbit size
@@ -197,10 +197,12 @@ a library without ever starting the server.
 Anders-Briegel picture instead, where a frame is a *vertex operator* held as an
 actual single-qubit Clifford — as a 2x2 matrix (`CliffordSim`), as a
 phase-canonical key (`CliffordLUTSim`), or under an opaque id 0..23
-(`CliffordIDSim`). The graph layer, the coupled CZ block table and the tableau
-fallback are imported from the core rather than copied, so what differs between
-the backends is exactly the frame representation. `bench_frames.py --selftest`
-runs all four against the functional core op by op.
+(`CliffordIDSim`). The graph layer is imported from the core rather than
+copied. The three backends share GraphSim's CZ (coupled block table plus
+tableau fallback, in `graphsim/tables.py`), so among them what differs is
+exactly the frame representation; the core applies CZ by the Eulerian-frame
+rule, with no table. `bench_frames.py --selftest` checks the three backends
+against each other and `EulerSim` against the functional core, op by op.
 
 `cliffords.py` stays in the core because it is where the group is *defined*:
 `frames.py` derives its integer rules from it and verifies them against it, the

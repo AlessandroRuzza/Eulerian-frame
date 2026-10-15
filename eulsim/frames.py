@@ -175,8 +175,8 @@ def left_compose(code: int, *gates: str) -> int:
 #     "X" = HSH  ~ √(-iX)   (a move at the vertex itself)
 #     "Z" = S†   ~ √(-iZ)   (a move at a neighbour, the "swapping partner")
 # whose product is ∝ that letter.  Burning this word by re-framing moves is
-# Anders-Briegel's remove_VOP (quant-ph/0504117), used by the local CZ
-# algorithm in ``gates``.
+# Anders-Briegel's remove_VOP (quant-ph/0504117), used by the CZ of the
+# GraphSim baselines in ``graphsim``.
 
 def _build_decomp() -> list:
     from collections import deque
@@ -212,7 +212,7 @@ def conj(code: int, letter: str) -> tuple[int, str]:
 
 
 def is_zaxis(code: int) -> bool:
-    """Is ``w^N`` on the Z axis?  The CZ case split of the local algorithm."""
+    """Is ``w^N`` on the Z axis?  The case split of the CZ rule."""
     return code % 6 in (2, 5)
 
 

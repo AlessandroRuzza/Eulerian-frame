@@ -538,7 +538,7 @@
           <button class="sec" id="fusRunBtn" onclick="fusionRunAll()" title="Apply every remaining operation">Run all &#9654;&#9654;</button>
           <button class="ghost small" onclick="fusionReset()" title="Restore the graph as it was when this fusion was armed">&#8635; Reset</button>
         </div>
-        <label class="meas-toggle" title="Canonicalize the frame once both qubits are measured, as in the thesis figures.">
+        <label class="meas-toggle" title="Canonicalize the frame once both qubits are measured.">
           <input type="checkbox" id="fusCanon" checked>
           <span class="meas-switch"></span>
           <span>Canonicalize at the end</span>
@@ -3007,10 +3007,10 @@ function toggleCompare() {
 }
 
 // ─── Fusion mode ─────────────────────────────────────────────────────────────
-// A fusion (thesis def. 2.47) is the destructive joint measurement of two
+// A fusion is the destructive joint measurement of two
 // commuting two-qubit parities P = σ_A τ_B and P' = σ'_A τ'_B with σ_A ≠ σ'_A
 // and τ_B ≠ τ'_B — 36 pairs, five classes in Löbl et al. Every one of them is
-// the same circuit (thesis §2.3.5, §6.2):
+// the same circuit:
 //
 //     A ── C_A ──●── M_X
 //                │
@@ -3030,7 +3030,7 @@ let fusion = null;          // armed plan: {pairs, steps, idx, snapshot}
 
 const PAULI_MAT = {X: PAULI_X_MAT, Y: PAULI_Y_MAT, Z: PAULI_Z_MAT};
 
-// The five classes of thesis §6.2, as [σ_A, τ_B, σ'_A, τ'_B].
+// The five fusion classes, as [σ_A, τ_B, σ'_A, τ'_B].
 const FUSION_TYPES = {
   xz_zx: ['X','Z','Z','X'],   // result 6.7  — C_A = C_B = I
   xx_zz: ['X','X','Z','Z'],   // result 6.8  — H on B
@@ -3040,8 +3040,8 @@ const FUSION_TYPES = {
 };
 
 // The Clifford C with C†XC = sx and C†ZC = sz. A sign-exact C is preferred (it
-// is the one the thesis quotes); failing that any C whose images are right up
-// to sign will do, since the fusion types of [41] are defined up to sign and
+// is the canonical choice); failing that any C whose images are right up
+// to sign will do, since the fusion types of Löbl et al. are defined up to sign and
 // the sign only swaps the two outcomes of the parity.
 function _cliffordForImages(sx, sz) {
   let loose = null;
@@ -3252,7 +3252,7 @@ function _fusionCardOpts() {
           canon: _fusEl('fusCanon').checked};
 }
 
-// The circuit as a list of operations on `graph`, in the order of thesis §6.2.
+// The circuit as a list of operations on `graph`, in circuit order.
 function _fusionPlan(graph, c, cl, opts) {
   const lbl = id => escapeHtml(graph.vertices.find(v => v.id === id)?.label ?? id);
   const steps = [];

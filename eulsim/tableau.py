@@ -12,7 +12,8 @@ from __future__ import annotations
 
 from .frames import DAG, ID_PAIR, LGATE, conj, parse_frame
 
-_PC = {"X": "#1a8078", "Y": "#b85535", "Z": "#5a1f6e", "I": "#888888"}
+# CSS variables (themed by the page) with the light-theme colour as fallback.
+_PC = {"X": "var(--p-x, #1a8078)", "Y": "var(--p-y, #b85535)", "Z": "var(--p-z, #5a1f6e)", "I": "var(--muted, #888888)"}
 
 
 def compute_stabilizers(

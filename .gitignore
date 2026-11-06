@@ -2,3 +2,6 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+build/
+eulsim/_core.cpp
+eulsim/*.so

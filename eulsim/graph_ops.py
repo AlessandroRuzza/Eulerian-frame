@@ -83,15 +83,15 @@ def local_complement(adj: list[set[int]], n: int, v: int
 
 
 def lc_inplace(adj: list[set[int]], v: int) -> None:
-    """τ_v in place, no allocation and no toggle list — the hot path."""
-    nb = sorted(adj[v])
-    for i, u in enumerate(nb):
+    """τ_v in place, no allocation and no toggle list — the hot path.
+    N(u) <- N(u) Δ (N(v) \\ {u}) for every u in N(v): each side of every toggled
+    pair is updated once, by one C-level symmetric difference per neighbour.
+    N(v) itself is unchanged (v is not in N(v)), so it needs no copy."""
+    nb = adj[v]
+    for u in nb:
         au = adj[u]
-        for w in nb[i + 1:]:
-            if w in au:
-                au.discard(w); adj[w].discard(u)
-            else:
-                au.add(w); adj[w].add(u)
+        au ^= nb
+        au.discard(u)
 
 
 def reframe_move(adj: list[set[int]], n: int, v: int, frame: list | None

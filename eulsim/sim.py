@@ -45,6 +45,27 @@ class EulerSim:
         self.f = list(pair_codes)
         self.n_toggle = self.n_degenerate = 0
 
+    # -- graph access (the API shared with the compiled ``_core.CoreSim``) --
+    def add_vertex(self, code: int) -> int:
+        self.adj.append(set())
+        self.f.append(code)
+        return len(self.f) - 1
+
+    def neighbors(self, i: int) -> set:
+        return set(self.adj[i])
+
+    def degree(self, i: int) -> int:
+        return len(self.adj[i])
+
+    def has_edge(self, i: int, j: int) -> bool:
+        return j in self.adj[i]
+
+    def toggle_edge(self, i: int, j: int) -> None:
+        toggle_edge(self.adj, i, j)
+
+    def adj_sets(self) -> list[set]:
+        return [set(s) for s in self.adj]
+
     # -- single-qubit physical gate (left composition) --
     def apply_local(self, v: int, table: list) -> None:
         """``table`` is one of ``frames.LGATE``'s entries."""

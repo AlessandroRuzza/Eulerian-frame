@@ -119,6 +119,13 @@ Each editor has a **↓ PNG** button that saves the shown Eulerian frame —
 colour, label or ZX rendering — as a PNG cropped to the drawing.
 Vertices can be relabelled, panels reordered by dragging, and the frame shown in the dual basis.
 
+On the canvas: click empty space to add a qubit, click a qubit to select it,
+click a second one to apply the two-qubit gate (hovering it previews the gate).
+With a qubit selected, a click on empty space — or `Esc` — lets go of it and
+`Del` deletes it; `Ctrl+Z` undoes. In compare mode the keys act on the graph
+you touched last. Animations are short and cosmetic, and are switched off under
+`prefers-reduced-motion`.
+
 ## HTTP API
 
 Everything the frontend does goes through JSON POSTs; the server is stateless,

@@ -89,8 +89,30 @@
     h3 { margin:0 0 8px; font-family: var(--serif); font-size:.95rem; font-weight:600; color:var(--ink-2); }
     sub, sup { line-height: 0; }
     :focus-visible { outline: 2px solid var(--info); outline-offset: 2px; }
-    @keyframes rise { from { opacity:0; } to { opacity:1; } }
+    /* Motion: every keyframe set below only names its *start* state, so with
+       animations off (reduced motion, PNG export) an element simply sits in
+       its final, natural state. Durations stay under ~300 ms and nothing
+       waits on them, except the measured-qubit fade. */
+    @keyframes rise { from { opacity:0; transform: translateY(6px); } }
+    @keyframes fade { from { opacity:0; } }
+    @keyframes pop  { from { opacity:0; transform: translateY(6px) scale(.97); } }
     @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes flash {
+      from { background-color: color-mix(in srgb, var(--warn) 38%, var(--surface));
+             box-shadow: 0 0 0 2px color-mix(in srgb, var(--warn) 70%, transparent); }
+    }
+    @keyframes nudge { 30% { transform: translateX(-4px); } 65% { transform: translateX(3px); } }
+    @keyframes logoDraw { from { stroke-dashoffset: 1; } }
+    @keyframes logoDot  { from { opacity:0; transform: scale(.2); } }
+    /* canvas */
+    @keyframes vIn      { from { opacity:0; transform: scale(.5); } }
+    @keyframes vOut     { to   { opacity:.1; transform: scale(.78); } }
+    @keyframes edgeIn   { from { stroke-dashoffset: 1; } }
+    @keyframes ghostOut { from { opacity:.95; } to { opacity:0; } }
+    @keyframes ringSpin { to { transform: rotate(360deg); } }
+    /* Theme switch: the new theme opens as a circle from the theme button
+       (cycleTheme() animates the clip; the default cross-fade is turned off). */
+    ::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
 
     /* ── Top bar ───────────────────────────────────────────────────────── */
     .topbar {
@@ -104,6 +126,11 @@
     }
     .brand { display:flex; align-items:baseline; gap:10px; margin-right:auto; min-width:0; padding-bottom:10px; }
     .logo { width:34px; height:34px; flex:none; align-self:center; color: var(--ink); }
+    /* Drawn once on load: spine and arms first, then the vertices. */
+    .logo path { stroke-dasharray: 1; animation: logoDraw .8s .1s ease-out both; }
+    .logo circle { transform-box: fill-box; transform-origin: center;
+                   animation: logoDot .32s .55s cubic-bezier(.2,.9,.3,1.4) both; }
+    .logo > circle { animation-delay: .8s; }
     .brand-name { font-family: var(--serif); font-weight:600; font-size:1.35rem; display:flex; align-items:baseline; gap:8px; }
     .brand-sub { font-family: var(--serif); font-style:italic; font-size:.9rem; color:var(--muted); white-space:nowrap; }
     .vtag { font-family: var(--font); font-size:.75rem; font-weight:400; color: var(--muted); }
@@ -122,11 +149,25 @@
     .seg button:hover { color: var(--ink); background: transparent; filter:none; border-bottom-color: var(--line-strong); }
     .seg button.active { color: var(--ink); font-weight:600; border-bottom-color: var(--accent); }
     button.mode-btn.active, .seg .ws-btn.active { pointer-events:none; cursor:default; }
+    /* Exclusive switches: one underline that slides to the option in force.
+       _syncSegIndicators() measures the active button; until it has run
+       (.ind-ready) the per-button underline above stays as the fallback. */
+    .seg.slide { position:relative; }
+    .seg.slide.ind-ready button.active { border-bottom-color: transparent; }
+    .seg.slide.ind-ready::after {
+      content:''; position:absolute; left:0; bottom:0; height:2px; width:1px;
+      background: var(--accent); transform-origin: 0 50%; pointer-events:none;
+      transform: translateX(var(--ind-x, 0px)) scaleX(var(--ind-w, 0));
+    }
+    .seg.slide.ind-anim::after { transition: transform .24s cubic-bezier(.3,.8,.2,1); }
     .icon-btn {
       padding:5px 8px; font-size:.9rem; font-weight:400; color:var(--ink-2);
       background:transparent !important; border-color:transparent !important;
+      display:inline-flex; align-items:center;
     }
-    .icon-btn:hover { border-color: var(--line-strong) !important; }
+    .icon-btn:hover { border-color: var(--line-strong) !important; color: var(--ink); }
+    .icon-btn svg { width:15px; height:15px; flex:none; }
+    .icon-btn svg + .tb-long { margin-left:6px; }
 
     /* ── Layout ────────────────────────────────────────────────────────── */
     .wrap { max-width: 1480px; margin: 0 auto; padding: 16px 20px 40px; animation: rise .35s ease both; }
@@ -166,6 +207,8 @@
     }
     .card-head { display:flex; align-items:center; gap:8px; margin-bottom:12px; min-height:28px; }
     .card-head h2 { display:flex; align-items:center; gap:6px; min-width:0; }
+    /* Workspace switch / a panel that has just appeared. */
+    .ws-enter > .card, .ws-enter > .right-stack > .card, .card.card-enter { animation: rise .24s ease both; }
     .card.collapsed { padding-bottom: 14px; }
     .card.collapsed > :not(.card-head) { display:none !important; }
     .card.collapsed > .card-head { margin-bottom:0; }
@@ -211,6 +254,15 @@
     button.sync-btn { background: transparent; color: var(--violet); border-color: var(--violet); }
     button.cmp-toggle { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); }
     button.cmp-toggle:hover { background: var(--surface-3); color: var(--ink); filter:none; }
+    /* Unavailable right now (no qubit selected, nothing to undo). Kept
+       clickable so the tooltip still shows and a click can say why. */
+    button[aria-disabled="true"] { opacity:.4; cursor:not-allowed; }
+    button[aria-disabled="true"]:hover  { filter:none; }
+    button[aria-disabled="true"]:active { transform:none; }
+    button.ghost[aria-disabled="true"]:hover, button.tool[aria-disabled="true"]:hover { background:transparent; color:var(--ink-2); }
+    button.danger[aria-disabled="true"]:hover { background:transparent; color:var(--danger); }
+    button.warn[aria-disabled="true"]:hover   { background:transparent; color:var(--warn); }
+    button:disabled { opacity:.4; cursor:not-allowed; filter:none; }
     select, input[type=number], input[type=text] {
       font: inherit; font-size:.82rem; color: var(--ink); background: var(--surface);
       border:1px solid var(--line-strong); border-radius:var(--radius-sm); padding:4px 7px;
@@ -262,8 +314,33 @@
     }
     .graph-svg g[data-vid] .vnode { transition: stroke-width .12s; }
     .graph-svg g[data-vid]:hover .vnode { stroke-width: 3; }
+    .graph-svg.is-dragging, .graph-svg.is-dragging g { cursor: grabbing; }
+    /* Canvas motion. The classes are added by draw() only to what is new since
+       the previous draw, with a negative animation-delay equal to the element's
+       age: draw() rebuilds the SVG on every change, and this lets an animation
+       carry on across rebuilds instead of restarting or being cut short. */
+    .graph-svg .v-enter  { animation: vIn .26s cubic-bezier(.2,.9,.3,1.25) both; }
+    .graph-svg .v-exit   { opacity:.25; animation: vOut .26s ease-in both; }
+    .graph-svg .e-enter  { stroke-dasharray: 1; animation: edgeIn .3s ease-out both; }
+    .graph-svg .f-enter  { animation: fade .3s ease-out both; }
+    .graph-svg .e-ghost  { animation: ghostOut .38s ease-out both; }
+    .graph-svg .sel-ring { animation: ringSpin 9s linear infinite; }
+    .canvas-stat {
+      position:absolute; right:10px; bottom:8px; pointer-events:none; user-select:none;
+      font-family: var(--mono); font-size:.72rem; color: var(--muted);
+      padding:2px 7px; border-radius: var(--radius-sm);
+      background: color-mix(in srgb, var(--surface) 82%, transparent);
+    }
+    .canvas-stat:empty { display:none; }
     .hint { margin:8px 0 0; font-size:.86rem; color:var(--muted); line-height:1.5; }
     .hint kbd { font: inherit; font-weight:600; color:var(--ink-2); }
+    .hint kbd.key {
+      font-family: var(--mono); font-size:.74rem; font-weight:400; color: var(--ink-2);
+      padding:1px 5px; border:1px solid var(--line-strong); border-bottom-width:2px;
+      border-radius: var(--radius-sm); background: var(--surface); white-space:nowrap;
+    }
+    .canvas-hint b { color: var(--info); font-family: var(--mono); font-size:.92em; }
+    @media (hover: none) { .kbd-only { display:none; } }   /* touch: no keyboard to hint at */
     details.legend-details { margin-top:6px; }
     details.legend-details > summary {
       cursor:pointer; font-size:.76rem; font-weight:600; color:var(--muted); list-style:none;
@@ -282,11 +359,19 @@
 
     /* ── Operations ────────────────────────────────────────────────────── */
     .ops-vertex-label {
-      display:inline-flex; align-items:center; gap:6px; margin-bottom:12px;
-      font-size:.95rem; font-weight:700; color:var(--ink);
-      padding:0; background:none; border:0; font-family: var(--serif); font-size:1.05rem;
+      display:flex; align-items:center; gap:8px; margin-bottom:12px; min-height:28px;
+      color:var(--ink); font-family: var(--serif); font-size:1rem;
     }
-    .ops-vertex-label::before { content:'Selected qubit:'; font-style:italic; font-weight:400; color:var(--muted); }
+    .ops-vertex-label::before { content:'Selected qubit'; font-style:italic; color:var(--muted); flex:none; }
+    .ops-vertex-label.nudge { animation: nudge .32s ease; }
+    .sel-pill {
+      font-family: var(--mono); font-size:.88rem; font-weight:600; padding:2px 10px; border-radius:999px;
+      color: var(--info); background: color-mix(in srgb, var(--info) 10%, var(--surface));
+      border:1px solid color-mix(in srgb, var(--info) 42%, var(--surface));
+      min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+      animation: pop .18s ease both;
+    }
+    .sel-none { font-family: var(--font); font-size:.88rem; color: var(--muted); }
     .ops-desc { font-size:.86rem; color:var(--muted); margin:10px 0 0; min-height:2.2em; line-height:1.45; }
 
     /* Fusion */
@@ -303,11 +388,21 @@
     .fus-pm { min-width:28px; padding:2px 8px; font-weight:800; }
 
     /* ── Frame vectors ─────────────────────────────────────────────────── */
-    .ev-display { background:var(--surface-2); border:1px solid var(--line); border-radius:var(--radius); padding:10px 12px; margin-bottom:8px; }
-    .ev-display-label { display:block; font-size:.82rem; font-style:italic; color:var(--muted); margin-bottom:6px; }
-    .ev-display-vec { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
-    .ev-chip { display:inline-flex; align-items:center; justify-content:center; min-width:34px; height:26px;
+    /* One column per qubit — name, w^C, w^N stacked — so a qubit's frame reads
+       straight down whatever the names' widths, and wraps as a unit. */
+    .ev-display { margin-bottom:4px; }
+    .ev-table { display:flex; flex-wrap:wrap; gap:10px 4px; }
+    .ev-col { display:flex; flex-direction:column; gap:3px; padding:3px; border-radius:var(--radius);
+              border:1px solid transparent; transition: border-color .15s, background-color .15s; }
+    .ev-col.sel { border-color: color-mix(in srgb, var(--info) 55%, var(--surface));
+                  background: color-mix(in srgb, var(--info) 8%, var(--surface)); }
+    .ev-head { padding-right:6px; }
+    .ev-head span { height:26px; display:flex; align-items:center; font-family:var(--serif);
+                    font-style:italic; font-size:.84rem; color:var(--muted); white-space:nowrap; }
+    .ev-key { margin:10px 0 0; font-size:.8rem; font-style:italic; color:var(--muted); line-height:1.5; }
+    .ev-chip { display:flex; align-items:center; justify-content:center; min-width:34px; height:26px;
                border-radius:var(--radius-sm); font-weight:700; font-size:.86rem; font-family:var(--mono); padding:0 6px; }
+    .flash { animation: flash .75s ease-out both; }
     .ev-chip-X { color:var(--p-x); background: color-mix(in srgb, var(--p-x) 14%, var(--surface)); }
     .ev-chip-Y { color:var(--p-y); background: color-mix(in srgb, var(--p-y) 14%, var(--surface)); }
     .ev-chip-Z { color:var(--p-z); background: color-mix(in srgb, var(--p-z) 14%, var(--surface)); }
@@ -315,11 +410,12 @@
 
     /* ── Stabilizers ───────────────────────────────────────────────────── */
     .stab-formula { font-size:.8rem; color:var(--muted); margin:-4px 0 10px; }
-    .stab-list { display:flex; flex-direction:column; gap:5px; }
+    .stab-list { display:flex; flex-direction:column; border-top:1px solid var(--line); }
     .stab-row {
-      display:flex; align-items:baseline; gap:8px; padding:6px 10px; border-radius:var(--radius);
-      background:var(--surface-2); border:1px solid var(--line); font-size:.88rem; flex-wrap:wrap;
+      display:flex; align-items:baseline; gap:8px; padding:7px 6px; font-size:.88rem; flex-wrap:wrap;
+      border-bottom:1px solid var(--line); transition: background-color .12s;
     }
+    .stab-row:hover { background: var(--surface-2); }
     .stab-lbl { font-weight:700; color:var(--info); min-width:28px; }
     .stab-eq  { color:var(--muted); }
     .stab-expr sub { font-size:.7em; }
@@ -378,7 +474,7 @@
     .props-grid { display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px; }
     .prop-item { padding:7px 10px; border-radius:var(--radius); background:var(--surface-2); border:1px solid var(--line); }
     .prop-label { display:block; font-size:.8rem; font-style:italic; color:var(--muted); margin-bottom:2px; }
-    .prop-val   { font-weight:700; font-size:.92rem; }
+    .prop-val   { font-family: var(--serif); font-weight:600; font-size:1.15rem; line-height:1.2; }
     .tags { display:flex; flex-wrap:wrap; gap:5px; margin-bottom:8px; }
     .tag { padding:3px 9px; border-radius:3px; font-size:.76rem; font-weight:600;
            color:var(--info); background: color-mix(in srgb, var(--info) 10%, var(--surface));
@@ -420,17 +516,19 @@
       position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
       background:var(--ink); color:var(--surface); padding:9px 18px; max-width:calc(100vw - 32px);
       border-radius:var(--radius); font-size:.92rem; font-weight:400; box-shadow: var(--shadow-lg);
-      opacity:0; pointer-events:none; transition:opacity .25s; z-index:9999; text-align:center;
+      opacity:0; pointer-events:none; z-index:9999; text-align:center;
+      transform:translate(-50%, 10px); transition:opacity .2s, transform .2s cubic-bezier(.2,.8,.3,1);
     }
-    #toast.show { opacity:1; }
+    #toast.show { opacity:1; transform:translate(-50%, 0); }
     .modal-overlay {
       position:fixed; inset:0; z-index:10000; padding:16px;
       background:rgba(5,10,18,.55); backdrop-filter:blur(3px);
-      display:flex; align-items:center; justify-content:center; animation:rise .15s ease both;
+      display:flex; align-items:center; justify-content:center; animation:fade .14s ease both;
     }
     .modal-box {
       background:var(--surface); color:var(--ink); border:1px solid var(--line);
       border-radius:var(--radius); padding:20px 22px; width:min(360px,92vw); box-shadow:var(--shadow-lg);
+      animation: pop .18s cubic-bezier(.2,.8,.3,1) both;
     }
     .modal-box h3 { margin:0 0 4px; font-size:1.05rem; color:var(--ink); }
     .modal-box .modal-sub { margin:0 0 14px; font-size:.8rem; color:var(--muted); line-height:1.45; }
@@ -453,7 +551,11 @@
     }
     @media (max-width: 899px) {
       .topbar-in { padding: 8px 16px; }
-      .tb-groups { order: 3; width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none; padding-bottom:2px; }
+      /* One scrolling row of switches; the right edge fades out to show there is more. */
+      .tb-groups { order: 3; width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none;
+                   padding: 0 28px 2px 0;
+                   -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent);
+                           mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent); }
       .tb-groups::-webkit-scrollbar { display:none; }
       .tb-label { display:none; }
       .wrap { padding: 12px 16px 32px; }
@@ -469,7 +571,7 @@
       .right-stack { display:flex; }
     }
     @media (max-width: 560px) {
-      .brand-sub { display:none; }
+      .brand-sub, .tb-long { display:none; }
       .toolbar { margin-left:0; width:100%; }
       .tsep { display:none; }
       .presets { flex-direction:column; gap:4px; }
@@ -481,6 +583,7 @@
     }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
+      .graph-svg .e-ghost { display:none; }
     }
   </style>
 </head>
@@ -491,7 +594,7 @@
     <div class="brand">
       <svg class="logo" viewBox="0 0 30 30" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round">
         <!-- An "E" drawn as a graph: a three-vertex spine with three arms. -->
-        <path d="M6.5 4.5 V25.5 M6.5 4.5 H24.5 M6.5 15 H20 M6.5 25.5 H24.5"/>
+        <path pathLength="1" d="M6.5 4.5 V25.5 M6.5 4.5 H24.5 M6.5 15 H20 M6.5 25.5 H24.5"/>
         <g fill="var(--bg)">
           <circle cx="6.5" cy="4.5" r="2.3"/><circle cx="6.5" cy="15" r="2.3"/><circle cx="6.5" cy="25.5" r="2.3"/>
           <circle cx="24.5" cy="4.5" r="2.3"/><circle cx="24.5" cy="25.5" r="2.3"/>
@@ -507,7 +610,7 @@
     <div class="tb-groups">
       <div class="tb-group" role="group" aria-label="Workspace">
         <span class="tb-label">Workspace</span>
-        <div class="seg">
+        <div class="seg slide">
           <button class="ws-btn active" id="singleModeBtn" onclick="setWorkspace('single')" title="One graph with the full inspector">Single</button>
           <button class="ws-btn" id="compareModeBtn" onclick="setWorkspace('compare')" title="Two graphs side by side: state equality, LC-equivalence, isomorphism">Compare</button>
           <button class="ws-btn" id="fusionModeBtn" onclick="setWorkspace('fusion')" title="Run a graph fusion between two qubits: local Cliffords, one CZ, two X measurements">Fusion</button>
@@ -515,7 +618,7 @@
       </div>
       <div class="tb-group" role="group" aria-label="View">
         <span class="tb-label">View</span>
-        <div class="seg">
+        <div class="seg slide">
           <button class="mode-btn" id="labelModeBtn" onclick="setViewMode('label')" title="Frame as the vertex basis (w^N, w^C) written above each vertex">Label</button>
           <!-- Colour mode is hidden for now: the vertex colours carry the Pauli
                letters but not their signs, so a negative image is indistinguishable
@@ -539,14 +642,14 @@
     <div class="tb-actions">
       <button class="ghost icon-btn" id="themeBtn" onclick="cycleTheme()" title="Theme: follow system">Auto</button>
       <button class="ghost icon-btn" id="shareQRBtn" onclick="showShareQR()" title="QR code for this simulator's address, for opening it on another device">Share</button>
-      <button class="ghost icon-btn" id="resetLayoutBtn" onclick="resetLayout()" title="Reset panel order (panels can be dragged by their &#10303; grip)">Reset</button>
+      <button class="ghost icon-btn" id="resetLayoutBtn" onclick="resetLayout()" title="Reset panel order (panels can be dragged by their &#10303; grip)">Reset<span class="tb-long">&nbsp;layout</span></button>
     </div>
   </div>
 </header>
 
 <main class="wrap">
   <div class="cmp-tabs" id="cmpTabs">
-    <div class="seg" role="tablist" aria-label="Graph shown">
+    <div class="seg slide" role="tablist" aria-label="Graph shown">
       <button class="active" id="cmpTabA" onclick="setCmpTab('a')">Graph A</button>
       <button id="cmpTabB" onclick="setCmpTab('b')">Graph B</button>
     </div>
@@ -559,7 +662,7 @@
       <div class="card-head">
         <h2><span class="side-badge" id="graphALabel">A</span>Graph editor</h2>
         <div class="toolbar">
-          <button class="tool small" onclick="graphA.doUndo()" title="Undo the last operation">&#8617; Undo</button>
+          <button class="tool small" id="undoBtnA" onclick="graphA.doUndo()" title="Undo the last operation (Ctrl+Z)">&#8617; Undo</button>
           <span class="tsep"></span>
           <span class="tool-group">
             <span id="lcSpinA" class="lc-spinner"></span>
@@ -597,14 +700,8 @@
           <button class="ghost small" onclick="graphA.loadPreset('kl')" title="Triangle + three L-shaped 3-paths (12 qubits)">K-L</button>
         </div>
       </div>
-      <div class="canvas-wrap"><svg id="graphSvgA" class="graph-svg" viewBox="0 0 680 430"></svg></div>
-      <p class="hint">
-        Each qubit starts in |+&rang;; each edge is a CZ. &nbsp;
-        <kbd>Click empty space</kbd> add qubit &middot;
-        <kbd>Click qubit</kbd> select &middot;
-        <kbd>Click two qubits</kbd> two-qubit gate &middot;
-        <kbd>Drag</kbd> move
-      </p>
+      <div class="canvas-wrap"><svg id="graphSvgA" class="graph-svg" viewBox="0 0 680 430"></svg><div class="canvas-stat" id="canvasStatA"></div></div>
+      <p class="hint canvas-hint" id="canvasHintA" aria-live="polite">Each qubit starts in |+&rang;; each edge is a CZ.</p>
       <details class="legend-details">
         <summary>Legend</summary>
         <div class="legend" id="legendStd_a">
@@ -726,7 +823,7 @@
       <!-- Operations -->
       <section class="card ops-card reorder-card" id="opsCard_a">
         <div class="card-head"><h2><span class="drag-handle" title="Drag to reorder">&#10303;</span>Operations</h2><button class="collapse-btn" title="Collapse"></button></div>
-        <div class="ops-vertex-label" id="opsVLabel_a">None</div>
+        <div class="ops-vertex-label" id="opsVLabel_a"><span class="sel-none">none</span></div>
         <div class="op-group">
           <div class="op-label">Graph moves</div>
           <div class="btn-row">
@@ -768,7 +865,7 @@
             <button class="danger small" onclick="graphA.doDelete()">Delete</button>
           </div>
         </div>
-        <p class="ops-desc" id="opsDesc_a">Select a qubit to apply operations.</p>
+        <p class="ops-desc" id="opsDesc_a">Click a qubit to apply operations to it.</p>
       </section>
 
       <!-- Eulerian vectors -->
@@ -791,7 +888,7 @@
       <div class="card-head">
         <h2><span class="side-badge b">B</span>Graph editor</h2>
         <div class="toolbar">
-          <button class="tool small" onclick="graphB.doUndo()" title="Undo the last operation">&#8617; Undo</button>
+          <button class="tool small" id="undoBtnB" onclick="graphB.doUndo()" title="Undo the last operation (Ctrl+Z)">&#8617; Undo</button>
           <span class="tsep"></span>
           <span class="tool-group">
             <span id="lcSpinB" class="lc-spinner"></span>
@@ -830,12 +927,8 @@
           <button class="ghost small" onclick="graphB.loadPreset('kl')" title="Triangle + three L-shaped 3-paths (12 qubits)">K-L</button>
         </div>
       </div>
-      <div class="canvas-wrap"><svg id="graphSvgB" class="graph-svg" viewBox="0 0 680 430"></svg></div>
-      <p class="hint">
-        <kbd>Click empty space</kbd> add qubit &middot;
-        <kbd>Click two qubits</kbd> toggle edge &middot;
-        <kbd>Drag</kbd> move
-      </p>
+      <div class="canvas-wrap"><svg id="graphSvgB" class="graph-svg" viewBox="0 0 680 430"></svg><div class="canvas-stat" id="canvasStatB"></div></div>
+      <p class="hint canvas-hint" id="canvasHintB" aria-live="polite"></p>
       <details class="legend-details">
         <summary>Legend</summary>
         <div class="legend" id="legendStd_b">
@@ -964,7 +1057,7 @@
     <!-- ── Operations panels (compare mode) ───────────────────────────── -->
     <section class="card ops-card" id="opsCard_a_cmp" style="display:none">
       <div class="card-head"><h2><span class="side-badge">A</span>Operations</h2><button class="collapse-btn" title="Collapse"></button></div>
-      <div class="ops-vertex-label" id="opsVLabel_a_cmp">None</div>
+      <div class="ops-vertex-label" id="opsVLabel_a_cmp"><span class="sel-none">none</span></div>
       <div class="op-group">
         <div class="op-label">Graph moves</div>
         <div class="btn-row">
@@ -1007,12 +1100,12 @@
           <button class="danger small" onclick="graphA.doDelete()">Delete</button>
         </div>
       </div>
-      <p class="ops-desc" id="opsDesc_a_cmp">Select a qubit in Graph A to apply operations.</p>
+      <p class="ops-desc" id="opsDesc_a_cmp">Click a qubit in Graph A to apply operations to it.</p>
     </section>
 
     <section class="card ops-card" id="opsCard_b_cmp" style="display:none">
       <div class="card-head"><h2><span class="side-badge b">B</span>Operations</h2><button class="collapse-btn" title="Collapse"></button></div>
-      <div class="ops-vertex-label" id="opsVLabel_b_cmp">None</div>
+      <div class="ops-vertex-label" id="opsVLabel_b_cmp"><span class="sel-none">none</span></div>
       <div class="op-group">
         <div class="op-label">Graph moves</div>
         <div class="btn-row">
@@ -1055,13 +1148,13 @@
           <button class="danger small" onclick="graphB.doDelete()">Delete</button>
         </div>
       </div>
-      <p class="ops-desc" id="opsDesc_b_cmp">Select a qubit to apply operations.</p>
+      <p class="ops-desc" id="opsDesc_b_cmp">Click a qubit in Graph B to apply operations to it.</p>
     </section>
 
   </div><!-- #mainLayout -->
 </main>
 
-<div id="toast"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 // ─── constants ────────────────────────────────────────────────────────────────
@@ -1282,10 +1375,27 @@ function zxPhaseLabel(k){
 // ─── utility ──────────────────────────────────────────────────────────────────
 function ekey(a, b) { return a < b ? `${a},${b}` : `${b},${a}`; }
 
+let _toastTimer = 0;
 function toast(msg, dur = 2200) {
   const el = document.getElementById('toast');
   el.textContent = msg; el.classList.add('show');
-  setTimeout(() => el.classList.remove('show'), dur);
+  clearTimeout(_toastTimer);       // a newer toast is not cut short by an older one's timer
+  _toastTimer = setTimeout(() => el.classList.remove('show'), dur);
+}
+
+// ─── motion ───────────────────────────────────────────────────────────────────
+// Canvas and panel animations are CSS keyframes started by a class. Both the
+// SVG and the panels are rebuilt from scratch on every change, which would
+// restart (or cut off) an animation each time; so whatever animates remembers
+// when it started, and a rebuild re-adds the class with a negative
+// animation-delay equal to its age — the animation simply carries on.
+const _reducedMotion = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : {matches: false};
+const V_IN_MS = 260, E_IN_MS = 300, GHOST_MS = 380, FLASH_MS = 750, RING_MS = 9000, FADE_OUT_MS = 280;
+function _animOn() { return !CANVAS_EXPORT && !_reducedMotion.matches; }
+// Start `cls` on a node as if it had begun `age` ms ago (negative: starts later).
+function _animate(node, cls, age) {
+  node.classList.add(cls);
+  node.style.animationDelay = `${-Math.round(age)}ms`;
 }
 
 // Change the display basis of one qubit in the state-vector panel.
@@ -1572,7 +1682,168 @@ class GraphState {
     this.history   = [];   // stack of {vertices, edges} snapshots
     this.globalPhase = [1, 0];   // display-only global phase ∈ {1, i, -1, -i}
 
+    // Motion bookkeeping (see "motion" above): when each vertex / edge first
+    // appeared, edges that have just gone (drawn fading for GHOST_MS), where
+    // everything was at the last draw, and the last value of each frame chip /
+    // stabilizer row so that a changed one can flash.
+    this._seenV = new Map();     // vertex id → time it entered
+    this._seenE = new Map();     // edge key  → time it entered
+    this._ghostE = new Map();    // edge key  → {x1, y1, x2, y2, t}
+    this._lastPos = new Map();   // vertex id → {x, y} at the previous draw
+    this._flashes = new Map();   // panel key → {val, t}
+    this._quietNext = false;     // next draw shows its changes without animating
+    this._fadeT = 0;
+    this._previewTo = null;      // vertex the two-qubit-gate preview points at
+    this._uiKey = '';
+
     this._bindEvents();
+  }
+
+  // Forget what was on the canvas: the next draw treats everything as new
+  // (a preset builds itself in) or, with quiet, as already there (undo).
+  _resetMotion(quiet = false) {
+    this._seenV.clear(); this._seenE.clear(); this._ghostE.clear();
+    this._lastPos.clear(); this._flashes.clear();
+    this._quietNext = quiet;
+  }
+
+  // Diff the graph against the previous draw: stamp what is new, turn edges
+  // that disappeared into ghosts. Dragging changes neither set, so it is free.
+  _trackMotion(now) {
+    const quiet = this._quietNext || _reducedMotion.matches;
+    this._quietNext = false;
+    const OLD = -1e12;
+    const fresh = this.vertices.filter(v => !this._seenV.has(v.id));
+    // Several at once (a preset): stagger them, the whole build-in under ~400 ms.
+    const step = fresh.length > 1 ? Math.min(16, 140 / fresh.length) : 0;
+    fresh.forEach((v, i) => this._seenV.set(v.id, quiet ? OLD : now + i * step));
+    if (this._seenV.size > this.vertices.length) {
+      const live = new Set(this.vertices.map(v => v.id));
+      for (const id of [...this._seenV.keys()]) if (!live.has(id)) this._seenV.delete(id);
+    }
+    const eDelay = fresh.length > 1 ? fresh.length * step * 0.5 : 0;
+    for (const k of this.edges)
+      if (!this._seenE.has(k)) this._seenE.set(k, quiet ? OLD : now + eDelay);
+    for (const k of [...this._seenE.keys()]) {
+      if (this.edges.has(k)) continue;
+      this._seenE.delete(k);
+      const [a, b] = k.split(',').map(Number);
+      const pa = this._lastPos.get(a), pb = this._lastPos.get(b);
+      if (!quiet && pa && pb) this._ghostE.set(k, {x1:pa.x, y1:pa.y, x2:pb.x, y2:pb.y, t:now});
+    }
+    for (const [k, g] of [...this._ghostE])
+      if (quiet || now - g.t > GHOST_MS || this.edges.has(k)) this._ghostE.delete(k);
+    this._lastPos = new Map(this.vertices.map(v => [v.id, {x:v.x, y:v.y}]));
+  }
+
+  // Edges that have just been removed (re-framing, a gate, a measurement):
+  // drawn dashed and fading, so what went is as visible as what came.
+  _drawGhostEdges(svg, now) {
+    if (!_animOn()) return;
+    for (const g of this._ghostE.values()) {
+      const line = el('line', {x1:g.x1, y1:g.y1, x2:g.x2, y2:g.y2, stroke:CV.hl,
+        'stroke-width':2.2, 'stroke-dasharray':'5 5', 'stroke-linecap':'round',
+        'pointer-events':'none'});
+      _animate(line, 'e-ghost', now - g.t);
+      svg.appendChild(line);
+    }
+  }
+
+  // Selection halo + slowly turning dashed ring.
+  _selMarks(v, now, ringAttrs) {
+    const ring = el('circle', {cx:v.x, cy:v.y, r:R+5, fill:'none', stroke:CV.sel, ...ringAttrs});
+    if (_animOn()) {
+      ring.style.transformOrigin = `${v.x}px ${v.y}px`;
+      _animate(ring, 'sel-ring', now % RING_MS);
+    }
+    return [el('circle', {cx:v.x, cy:v.y, r:R+9, fill:CV.selFill, stroke:'none'}), ring];
+  }
+
+  // Entrance / measured-fade animation of one vertex group.
+  _vertexMotion(g, v, now) {
+    if (!_animOn()) { if (v.id === this.animFade) g.style.opacity = '0.25'; return; }
+    g.style.transformOrigin = `${v.x}px ${v.y}px`;
+    if (v.id === this.animFade) { _animate(g, 'v-exit', now - this._fadeT); return; }
+    const age = now - (this._seenV.get(v.id) ?? -1e12);
+    if (age < V_IN_MS) _animate(g, 'v-enter', age);
+  }
+
+  // class / style attributes that flash a panel cell whose value has changed
+  // since it was last rendered. A key seen for the first time does not flash.
+  _flashAttr(key, val, now) {
+    let p = this._flashes.get(key);
+    if (!p) { this._flashes.set(key, {val, t: -1e12}); return ['', '']; }
+    if (p.val !== val) { p.val = val; p.t = now; }
+    const age = now - p.t;
+    return age < FLASH_MS && !_reducedMotion.matches
+      ? [' flash', ` style="animation-delay:${-Math.round(age)}ms"`] : ['', ''];
+  }
+
+  // Everything around the canvas that depends on the selection or on whether
+  // there is anything to undo: which Operations buttons are available, the
+  // Undo button, the hint under the canvas, the qubit / edge count.
+  _syncUI(force = false) {
+    const sel = this.selectedId === null ? null : this.vertices.find(v => v.id === this.selectedId);
+    const gate = (document.getElementById(`cgateSel_${this.side}`)?.value || 'cz').toUpperCase();
+    const n = this.vertices.length, m = this.edges.size;
+    const key = [comparisonMode, sel ? sel.id + sel.label : '', this.history.length > 0, n, m, gate].join('|');
+    if (!force && key === this._uiKey) return;
+    this._uiKey = key;
+    const S = this.side.toUpperCase();
+
+    const card = document.getElementById(this._opsCardId());
+    if (card) card.querySelectorAll('button[onclick*=".do"]')
+      .forEach(b => b.setAttribute('aria-disabled', String(!sel)));
+    document.getElementById(`undoBtn${S}`)?.setAttribute('aria-disabled', String(!this.history.length));
+
+    const stat = document.getElementById(`canvasStat${S}`);
+    if (stat) stat.textContent = n ? `${n} qubit${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}` : '';
+
+    const hint = document.getElementById(`canvasHint${S}`);
+    if (!hint) return;
+    const K = s => `<kbd class="key">${s}</kbd>`;
+    if (sel) {
+      hint.innerHTML = `<b>${escapeHtml(sel.label)}</b> selected &mdash; `
+        + `<kbd>click another qubit</kbd> to apply ${gate} &middot; `
+        + `<kbd>click empty space</kbd><span class="kbd-only"> or ${K('Esc')}</span> deselect`
+        + `<span class="kbd-only"> &middot; ${K('Del')} delete</span>`;
+    } else if (!n) {
+      hint.innerHTML = `Each qubit starts in |+&rang;; each edge is a CZ. &nbsp;`
+        + `<kbd>Click the canvas</kbd> to place a qubit, or load a preset.`;
+    } else {
+      hint.innerHTML = `<kbd>Click empty space</kbd> add qubit &middot; <kbd>Click a qubit</kbd> select, `
+        + `then a second one for ${gate} &middot; <kbd>Drag</kbd> move`
+        + `<span class="kbd-only"> &middot; ${K('Ctrl')}+${K('Z')} undo</span>`;
+    }
+  }
+
+  // Dashed line from the selected qubit to the one under the pointer: a click
+  // there applies the two-qubit gate. Lives outside draw() (which wipes it).
+  _setPreview(toId) {
+    if (toId === this._previewTo) return;
+    this._previewTo = toId;
+    const svg = this._svg();
+    svg.querySelector('.gate-preview')?.remove();
+    if (toId === null) return;
+    const a = this.vertices.find(v => v.id === this.selectedId);
+    const b = this.vertices.find(v => v.id === toId);
+    if (!a || !b) return;
+    const g = el('g', {class:'gate-preview', 'pointer-events':'none'});
+    g.appendChild(el('line', {x1:a.x, y1:a.y, x2:b.x, y2:b.y, stroke:CV.sel,
+      'stroke-width':2, 'stroke-dasharray':'5 4', 'stroke-linecap':'round'}));
+    const t = el('text', {x:(a.x+b.x)/2, y:(a.y+b.y)/2, 'text-anchor':'middle',
+      'dominant-baseline':'central', fill:CV.sel, 'font-size':11, 'font-weight':700,
+      stroke:CV.bg, 'stroke-width':4, 'stroke-linejoin':'round', 'paint-order':'stroke fill'});
+    t.textContent = (document.getElementById(`cgateSel_${this.side}`)?.value || 'cz').toUpperCase();
+    g.appendChild(t);
+    svg.insertBefore(g, svg.querySelector('g[data-vid]'));
+  }
+
+  deselect() {
+    if (this.selectedId === null) return;
+    this.selectedId = null;
+    this.hideOps();
+    this.draw();
   }
 
   // ── History ──────────────────────────────────────────────────────────────────
@@ -1586,6 +1857,7 @@ class GraphState {
   }
 
   doUndo() {
+    if (this.busy) return;       // a server call is rewriting the graph: its result maps onto the current arrays
     if (this.history.length === 0) { toast('Nothing to undo.'); return; }
     const snap = this.history.pop();
     this.vertices    = snap.vertices;
@@ -1594,6 +1866,7 @@ class GraphState {
     this.selectedId  = null;
     this.animEdges   = null;
     this.animFade    = null;
+    this._resetMotion(true);     // undo is instant: no build-in, no ghosts, no flashes
     this.hideOps();
     this.draw();
     this.fetchCompute();
@@ -1666,6 +1939,9 @@ class GraphState {
     if (!svg) return;
     svg.innerHTML = '';
     this._labelAligns = [];          // label-mode headers awaiting centring
+    this._previewTo = null;          // the gate preview went with the innerHTML
+    const now = performance.now();
+    if (!CANVAS_EXPORT) { this._trackMotion(now); this._syncUI(); }
 
     const bg = el('rect', {x:0, y:0, width:SVG_W, height:SVG_H, fill:CV.bg, id:`svgBg_${this.side}`});
     svg.appendChild(bg);
@@ -1696,7 +1972,7 @@ class GraphState {
       return;
     }
 
-    if (zxMode && !graphOnly) { this._drawZX(svg); this._updateEVDisplay(); return; }
+    if (zxMode && !graphOnly) { this._drawZX(svg, now); this._updateEVDisplay(); return; }
 
     for (const k of this.edges) {
       const [aid, bid] = k.split(',').map(Number);
@@ -1711,12 +1987,17 @@ class GraphState {
         'stroke-linecap': 'round',
       });
       if (highlighted) line.style.filter = `drop-shadow(0 0 6px ${CV.hl})`;
+      const eAge = now - (this._seenE.get(k) ?? -1e12);
+      if (eAge < E_IN_MS && _animOn()) {             // new edge: drawn in from one end
+        line.setAttribute('pathLength', 1);
+        _animate(line, 'e-enter', eAge);
+      }
       svg.appendChild(line);
     }
+    this._drawGhostEdges(svg, now);
 
     for (const v of this.vertices) {
       const isSel    = v.id === this.selectedId;
-      const isFading = v.id === this.animFade;
       const U = v.localU || CLIFFORD_I;
       const Ud = _displayU(U);                           // L_v, or L_v† in dual mode
       const supBasis = dualBasis ? basisFromU(Ud) : (v.basis || basisFromU(Ud));
@@ -1724,18 +2005,8 @@ class GraphState {
       const [supFill, supStroke] = basisColors(supBasis);
       const [eulFill, eulStroke] = basisColors(eulBasis);
       const g = el('g', {cursor:'pointer', 'data-vid': v.id});
-      if (isFading) g.style.opacity = '0.25';
-      if (isSel) {
-        g.appendChild(el('circle', {
-          cx:v.x, cy:v.y, r:R+9,
-          fill:CV.selFill, stroke:'none',
-        }));
-        g.appendChild(el('circle', {
-          cx:v.x, cy:v.y, r:R+5,
-          fill:'none', stroke:CV.sel,
-          'stroke-width':1.6, 'stroke-dasharray':'4 3',
-        }));
-      }
+      this._vertexMotion(g, v, now);
+      if (isSel) g.append(...this._selMarks(v, now, {'stroke-width':1.6, 'stroke-dasharray':'4 3'}));
       const plain = graphOnly || labelMode || cliffordMode;
       if (plain) {
         g.appendChild(el('circle', {                   // uncoloured disc; frame (if any) is text
@@ -1866,7 +2137,7 @@ class GraphState {
   // Vertex v → Z-spider with fused phase a·π/2; edge (u,v) → Hadamard edge;
   // the output wire of v carries X(b·π/2) then Z(c·π/2), so that the full
   // frame L_v = Z(c·π/2)·X(b·π/2)·Z(a·π/2) sits on qubit v.
-  _drawZX(svg) {
+  _drawZX(svg, now) {
     for (const k of this.edges) {
       const [aid, bid] = k.split(',').map(Number);
       const a = this.vertices.find(v => v.id === aid);
@@ -1881,23 +2152,25 @@ class GraphState {
         'stroke-linecap': 'round',
       });
       if (highlighted) line.style.filter = `drop-shadow(0 0 6px ${CV.hl})`;
-      svg.appendChild(line);
       const mx = (a.x+b.x)/2, my = (a.y+b.y)/2, HB = 6.5;
-      svg.appendChild(el('rect', {
+      const box = el('rect', {
         x:mx-HB, y:my-HB, width:2*HB, height:2*HB, rx:1.5,
         fill:ZX_H_FILL, stroke: highlighted ? CV.hl : ZX_H_STROKE,
         'stroke-width':1.4,
-      }));
+      });
       const ht = el('text', {x:mx, y:my, 'text-anchor':'middle',
         'dominant-baseline':'central', fill:CV.zxHt, 'font-size':8,
         'font-weight':700, 'pointer-events':'none'});
       ht.textContent = 'H';
-      svg.appendChild(ht);
+      // Hadamard edges are dashed already, so a new one fades in instead of being drawn in.
+      const eAge = now - (this._seenE.get(k) ?? -1e12);
+      if (eAge < E_IN_MS && _animOn()) for (const node of [line, box, ht]) _animate(node, 'f-enter', eAge);
+      svg.append(line, box, ht);
     }
+    this._drawGhostEdges(svg, now);
 
     for (const v of this.vertices) {
       const isSel    = v.id === this.selectedId;
-      const isFading = v.id === this.animFade;
       const [ea, eb, ec] = eulerTriple(v.localU || CLIFFORD_I);
 
       // Output wire points away from the neighbour centroid (down if isolated),
@@ -1918,12 +2191,8 @@ class GraphState {
       const px = -uy, py = ux;                       // wire-perpendicular unit
 
       const g = el('g', {cursor:'pointer', 'data-vid': v.id});
-      if (isFading) g.style.opacity = '0.25';
-      if (isSel) {
-        g.appendChild(el('circle', {cx:v.x, cy:v.y, r:R+9, fill:CV.selFill, stroke:'none'}));
-        g.appendChild(el('circle', {cx:v.x, cy:v.y, r:R+5, fill:'none', stroke:CV.sel,
-          'stroke-width':2, 'stroke-dasharray':'5 3'}));
-      }
+      this._vertexMotion(g, v, now);
+      if (isSel) g.append(...this._selMarks(v, now, {'stroke-width':2, 'stroke-dasharray':'5 3'}));
 
       g.appendChild(el('line', {x1:v.x, y1:v.y, x2:ex, y2:ey,
         stroke:ZX_WIRE, 'stroke-width':1.8, 'stroke-linecap':'round'}));
@@ -1973,30 +2242,27 @@ class GraphState {
 
   _evInnerHtml() {
     if (this.vertices.length === 0) return '';
-    const idChips = this.vertices.map(v =>
-      `<span class="ev-chip ev-chip-id">${escapeHtml(v.label)}</span>`).join('');
-    const centerChips = this.vertices.map(v => {
+    const now = performance.now();
+    const signed = ([sg, p]) => (sg < 0 ? '&minus;' : '+') + p;
+    const cols = this.vertices.map(v => {
       const U = _displayU(v.localU || [...CLIFFORD_I]);
-      const [cs, cp] = _conjugatedPauli(U, PAULI_X_MAT);
-      const sgn = cs < 0 ? '&minus;' : '+';
-      return `<span class="ev-chip ev-chip-${cp}">${sgn}${cp}</span>`;
-    }).join('');
-    const neighborChips = this.vertices.map(v => {
-      const U = _displayU(v.localU || [...CLIFFORD_I]);
-      const [ns, np] = _conjugatedPauli(U, PAULI_Z_MAT);
-      const sgn = ns < 0 ? '&minus;' : '+';
-      return `<span class="ev-chip ev-chip-${np}">${sgn}${np}</span>`;
+      const c = _conjugatedPauli(U, PAULI_X_MAT), nb = _conjugatedPauli(U, PAULI_Z_MAT);
+      const fc = this._flashAttr(`C:${v.id}`, `${c[0]}${c[1]}`, now);
+      const fn = this._flashAttr(`N:${v.id}`, `${nb[0]}${nb[1]}`, now);
+      return `<div class="ev-col${v.id === this.selectedId ? ' sel' : ''}">`
+        + `<span class="ev-chip ev-chip-id">${escapeHtml(v.label)}</span>`
+        + `<span class="ev-chip ev-chip-${c[1]}${fc[0]}"${fc[1]}>${signed(c)}</span>`
+        + `<span class="ev-chip ev-chip-${nb[1]}${fn[0]}"${fn[1]}>${signed(nb)}</span></div>`;
     }).join('');
     const wBar = dualBasis ? '<span style="text-decoration:overline">w</span>' : 'w';
     const cDef = dualBasis ? 'U&dagger;XU' : 'UXU&dagger;';
     const nDef = dualBasis ? 'U&dagger;ZU' : 'UZU&dagger;';
-    const dualTag = dualBasis ? ' &mdash; dual' : '';
-    return `<span class="ev-display-label">Qubit id</span>` +
-           `<div class="ev-display-vec">${idChips}</div>` +
-           `<span class="ev-display-label" style="margin-top:6px">Supplementary Vector ${wBar}<sup>C</sup>${dualTag} &mdash; center (${cDef})</span>` +
-           `<div class="ev-display-vec">${centerChips}</div>` +
-           `<span class="ev-display-label" style="margin-top:6px">Eulerian Vector ${wBar}<sup>N</sup>${dualTag} &mdash; neighbor (${nDef})</span>` +
-           `<div class="ev-display-vec">${neighborChips}</div>`;
+    const dualTag = dualBasis ? ' (dual)' : '';
+    return `<div class="ev-table">`
+         + `<div class="ev-col ev-head"><span>Qubit</span><span>${wBar}<sup>C</sup></span><span>${wBar}<sup>N</sup></span></div>`
+         + cols + `</div>`
+         + `<p class="ev-key">${wBar}<sup>C</sup> &mdash; supplementary vector${dualTag}, centre (${cDef}) &middot; `
+         + `${wBar}<sup>N</sup> &mdash; Eulerian vector${dualTag}, neighbour (${nDef})</p>`;
   }
 
   _updateEVDisplay() {
@@ -2010,7 +2276,7 @@ class GraphState {
     const v = this.vertices.find(v => v.id === id);
     if (!v) return;
     const lbl = document.getElementById(this._opsVLabelId());
-    if (lbl) lbl.textContent = `Qubit "${v.label}"`;
+    if (lbl) lbl.innerHTML = `<span class="sel-pill">${escapeHtml(v.label)}</span>`;
     const nb = this.vertices.filter(u => u.id !== v.id && this.hasEdge(v.id, u.id)).map(u => u.label);
     const desc = document.getElementById(this._opsDescId());
     const vl = escapeHtml(v.label);
@@ -2022,9 +2288,9 @@ class GraphState {
   // Card stays visible; just reset its text to the "nothing selected" state.
   hideOps() {
     const lbl = document.getElementById(this._opsVLabelId());
-    if (lbl) lbl.textContent = 'None';
+    if (lbl) lbl.innerHTML = '<span class="sel-none">none</span>';
     const desc = document.getElementById(this._opsDescId());
-    if (desc) desc.textContent = 'Select a qubit to apply operations.';
+    if (desc) desc.textContent = `Click a qubit${comparisonMode ? ` in Graph ${this.side.toUpperCase()}` : ''} to apply operations to it.`;
   }
 
   selectVertex(id) {
@@ -2035,9 +2301,11 @@ class GraphState {
       return;
     }
     if (this.selectedId !== null) {
+      if (this.busy) return;         // doCZ would refuse: do not drop the selection for nothing
       const other = this.selectedId;
       this.selectedId = null;
       this.hideOps();
+      this.draw();                   // ring, hint and Operations follow at once, not after the round trip
       this.doCZ(other, id);          // clicking two qubits = apply CZ (not raw edge toggle)
       return;
     }
@@ -2161,7 +2429,7 @@ class GraphState {
   }
 
   doDelete() {
-    if (this.selectedId === null) return;
+    if (this.selectedId === null || this.busy) return;
     this._pushHistory();
     const id = this.selectedId;
     this.vertices = this.vertices.filter(v => v.id !== id);
@@ -2329,8 +2597,9 @@ class GraphState {
       toast(`Measured ${basis.toUpperCase()} on qubit ${vLabel} → result ${inv ? '1' : '0'}${del ? '' : ' — reset for reuse'}`);
 
       this.animFade = id;
+      this._fadeT = performance.now();
       this.draw();
-      await new Promise(r => setTimeout(r, 600));
+      await new Promise(r => setTimeout(r, _reducedMotion.matches ? 0 : FADE_OUT_MS));
 
       const kept = data.kept_indices.map(i => this.vertices[i]);
       this.vertices = kept;
@@ -2477,9 +2746,10 @@ class GraphState {
     if (!stabs || !stabs.length) {
       panel.innerHTML = '<p class="hint">Add qubits to see stabilisers.</p>'; return;
     }
+    const now = performance.now();
     panel.innerHTML = `<div class="stab-list">` +
-      stabs.map(s => `
-        <div class="stab-row">
+      stabs.map(s => [s, this._flashAttr(`S:${s.label}`, s.pauli, now)]).map(([s, f]) => `
+        <div class="stab-row${f[0]}"${f[1]}>
           <span class="stab-lbl">S<sub>${s.label}</sub></span>
           <span class="stab-eq">=</span>
           <span class="stab-expr">${s.compact}</span>
@@ -2681,6 +2951,7 @@ class GraphState {
     this.nextId     = vertices.reduce((m,v) => Math.max(m, v.id+1), 0);
     this.animEdges  = null;
     this.animFade   = null;
+    this._resetMotion();
     this.hideOps();
     this.draw();
     this.fetchCompute();
@@ -3157,6 +3428,7 @@ class GraphState {
       const vg = e.target.closest('[data-vid]');
       const vid = vg ? parseInt(vg.dataset.vid) : null;
       const v = vid === null ? null : this.vertices.find(v => v.id === vid);
+      activeGraph = this;
       this.dragging = {pointerId: e.pointerId, id: v ? vid : null,
                        startPt: pt, origX: v ? v.x : 0, origY: v ? v.y : 0,
                        moved: false};
@@ -3165,11 +3437,22 @@ class GraphState {
     });
 
     svgEl.addEventListener('pointermove', e => {
-      if (!this.dragging || e.pointerId !== this.dragging.pointerId) return;
+      if (!this.dragging) {
+        // Hovering a second qubit while one is selected: preview the gate.
+        if (e.pointerType !== 'mouse' || this.selectedId === null) return;
+        const vg = e.target.closest('[data-vid]');
+        const vid = vg ? parseInt(vg.dataset.vid) : null;
+        this._setPreview(vid !== null && vid !== this.selectedId ? vid : null);
+        return;
+      }
+      if (e.pointerId !== this.dragging.pointerId) return;
       const pt = svgCoordFromEvent(e, svgEl);
       const dx = pt.x - this.dragging.startPt.x;
       const dy = pt.y - this.dragging.startPt.y;
-      if (!this.dragging.moved && Math.hypot(dx, dy) > 6) this.dragging.moved = true;
+      if (!this.dragging.moved && Math.hypot(dx, dy) > 6) {
+        this.dragging.moved = true;
+        if (this.dragging.id !== null) svgEl.classList.add('is-dragging');
+      }
       if (this.dragging.moved && this.dragging.id !== null) {
         const v = this.vertices.find(v => v.id === this.dragging.id);
         if (v) {
@@ -3185,14 +3468,19 @@ class GraphState {
       if (!this.dragging || e.pointerId !== this.dragging.pointerId) return;
       const d = this.dragging;
       this.dragging = null;
+      svgEl.classList.remove('is-dragging');
       try { svgEl.releasePointerCapture(e.pointerId); } catch (_) {}
       if (e.type === 'pointercancel' || d.moved) return;
       if (d.id !== null) { this.selectVertex(d.id); return; }
+      // Empty space: with a qubit selected the click lets go of it; otherwise
+      // it places a new qubit.
+      if (this.selectedId !== null) { this.deselect(); return; }
       const pt = svgCoordFromEvent(e, svgEl);
       if (!this.vertexAt(pt.x, pt.y, -1)) this.addVertex(pt.x, pt.y);
     };
     svgEl.addEventListener('pointerup', endPointer);
     svgEl.addEventListener('pointercancel', endPointer);
+    svgEl.addEventListener('pointerleave', () => this._setPreview(null));
 
     // Suppress the synthetic click that follows a pointer gesture; all
     // selection / creation is handled in endPointer above.
@@ -3203,6 +3491,7 @@ class GraphState {
 // ─── instantiate graphs ───────────────────────────────────────────────────────
 const graphA = new GraphState('graphSvgA', 'a');
 const graphB = new GraphState('graphSvgB', 'b');
+let activeGraph = graphA;    // the graph last touched: keyboard shortcuts act on it
 
 // ─── comparison mode ──────────────────────────────────────────────────────────
 function syncMeasDelete(src) {
@@ -3252,6 +3541,12 @@ function toggleCompare() {
   if (gcA && gcA.parentElement !== ml) ml.insertBefore(gcA, ml.firstChild);
   ml.classList.toggle('layout', !comparisonMode);
   ml.classList.toggle('layout-compare', comparisonMode);
+  _replayAnim(ml, 'ws-enter', 'rise');
+  // The Operations cards differ between the two layouts: carry the selection over.
+  for (const g of [graphA, graphB]) {
+    g._syncUI(true);
+    if (g.selectedId !== null) g.showOps(g.selectedId); else g.hideOps();
+  }
 
   if (comparisonMode) {
     // Ensure B events are bound now that the element is visible
@@ -3442,6 +3737,7 @@ function toggleFusionMode() {
   if (fusionMode && comparisonMode) toggleCompare();    // fusion drives graph A
   _syncWorkspace();
   _fusEl('fusionCard').style.display = fusionMode ? '' : 'none';
+  if (fusionMode) _replayAnim(_fusEl('fusionCard'), 'card-enter', 'rise');
   fusion = null;
   if (fusionMode) {
     _fusionSetParities(FUSION_TYPES[_fusEl('fusType').value] || FUSION_TYPES.xz_zx);
@@ -3783,6 +4079,7 @@ function _syncViewMode() {
       `Label = (${bar}<sup>N</sup><sub>i</sub>, ${bar}<sup>C</sup><sub>i</sub>)`
       + ` = (${dag[0]}, ${dag[1]}) &mdash; Eulerian first`;
   }
+  _syncSegIndicators();
   graphA.draw();
   graphB.draw();
 }
@@ -4506,18 +4803,59 @@ function _syncWorkspace() {
   }
   document.body.classList.toggle('ws-compare', ws === 'compare');
   document.body.classList.toggle('ws-fusion',  ws === 'fusion');
+  _syncSegIndicators();
 }
+
+// Restart a one-shot CSS animation class on an element. `name` is the keyframe
+// set the class runs: animationend bubbles, so the ends of unrelated animations
+// inside the element (a flashing chip, a vertex popping in) must not clear it.
+function _replayAnim(node, cls, name) {
+  if (!node) return;
+  node.classList.remove(cls);
+  void node.offsetWidth;                     // reflow, so re-adding restarts it
+  node.classList.add(cls);
+  const done = e => {
+    if (e.animationName !== name) return;
+    node.classList.remove(cls);
+    node.removeEventListener('animationend', done);
+  };
+  node.addEventListener('animationend', done);
+}
+
+// Place the sliding underline of every exclusive switch under its active
+// button. The first placement is not animated (nothing to slide from).
+function _syncSegIndicators() {
+  for (const seg of document.querySelectorAll('.seg.slide')) {
+    const b = seg.querySelector('button.active');
+    if (!b || !b.offsetWidth) continue;      // hidden (compare tabs on a wide screen)
+    seg.style.setProperty('--ind-x', `${b.offsetLeft}px`);
+    seg.style.setProperty('--ind-w', b.offsetWidth);
+    if (!seg.classList.contains('ind-ready')) {
+      seg.classList.add('ind-ready');
+      requestAnimationFrame(() => requestAnimationFrame(() => seg.classList.add('ind-anim')));
+    }
+  }
+}
+window.addEventListener('resize', _syncSegIndicators);
+if (document.fonts && document.fonts.ready) document.fonts.ready.then(_syncSegIndicators);
 
 // Narrow screens show one compare graph at a time.
 function setCmpTab(side) {
   document.body.dataset.cmpTab = side;
   document.getElementById('cmpTabA').classList.toggle('active', side === 'a');
   document.getElementById('cmpTabB').classList.toggle('active', side === 'b');
+  _syncSegIndicators();
+  activeGraph = side === 'b' ? graphB : graphA;
   (side === 'b' ? graphB : graphA).draw();    // label headers need a laid-out SVG
 }
 
 const THEME_KEY = 'eulsim-theme';
-const THEME_ICON  = {auto:'Auto', light:'Light', dark:'Dark'};
+const _ICO = d => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const THEME_ICON  = {
+  auto:  _ICO('<circle cx="8" cy="8" r="5.6"/><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor"/>') + '<span class="tb-long">Auto</span>',
+  light: _ICO('<circle cx="8" cy="8" r="2.9"/><path d="M8 1.4v1.6M8 13v1.6M1.4 8H3M13 8h1.6M3.3 3.3l1.2 1.2M11.5 11.5l1.2 1.2M12.7 3.3l-1.2 1.2M4.5 11.5l-1.2 1.2"/>') + '<span class="tb-long">Light</span>',
+  dark:  _ICO('<path d="M13.4 9.6A5.7 5.7 0 0 1 6.4 2.6a5.7 5.7 0 1 0 7 7z"/>') + '<span class="tb-long">Dark</span>',
+};
 const THEME_TITLE = {auto:'Theme: follow system', light:'Theme: light', dark:'Theme: dark'};
 function _themePref() {
   const t = document.documentElement.dataset.theme;
@@ -4525,15 +4863,39 @@ function _themePref() {
 }
 function _syncThemeBtn() {
   const b = document.getElementById('themeBtn'), p = _themePref();
-  if (b) { b.textContent = THEME_ICON[p]; b.title = THEME_TITLE[p] + ' (click to change)'; }
+  if (b) {
+    b.innerHTML = THEME_ICON[p];
+    b.title = THEME_TITLE[p] + ' (click to change)';
+    // The label is icon-only on narrow screens; keep the name it shows elsewhere.
+    b.setAttribute('aria-label', `Theme: ${{auto:'Auto', light:'Light', dark:'Dark'}[p]}`);
+  }
 }
 function cycleTheme() {
   const next = {auto:'light', light:'dark', dark:'auto'}[_themePref()];
   const r = document.documentElement;
-  if (next === 'auto') delete r.dataset.theme; else r.dataset.theme = next;
-  try { next === 'auto' ? localStorage.removeItem(THEME_KEY) : localStorage.setItem(THEME_KEY, next); } catch (_) {}
-  _syncThemeBtn();
-  _redrawTheme();
+  const wasDark = _themeIsDark();
+  const apply = () => {
+    if (next === 'auto') delete r.dataset.theme; else r.dataset.theme = next;
+    try { next === 'auto' ? localStorage.removeItem(THEME_KEY) : localStorage.setItem(THEME_KEY, next); } catch (_) {}
+    _syncThemeBtn();
+    _redrawTheme();
+  };
+  const btn = document.getElementById('themeBtn');
+  // Where supported, the new theme opens as a circle from the button. Skipped
+  // when the step does not change what is on screen (auto ↔ the same theme).
+  const willBeDark = next === 'auto'
+    ? !!(window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) : next === 'dark';
+  if (!document.startViewTransition || _reducedMotion.matches || !btn || willBeDark === wasDark) {
+    apply();
+  } else {
+    const b = btn.getBoundingClientRect();
+    const x = b.left + b.width / 2, y = b.top + b.height / 2;
+    const rad = Math.hypot(Math.max(x, innerWidth - x), Math.max(y, innerHeight - y));
+    document.startViewTransition(apply).ready.then(() => r.animate(
+      {clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${rad}px at ${x}px ${y}px)`]},
+      {duration: 420, easing: 'cubic-bezier(.4,0,.2,1)', pseudoElement: '::view-transition-new(root)'}
+    )).catch(() => {});
+  }
   toast(THEME_TITLE[next]);
 }
 function _redrawTheme() { applyCanvasTheme(); graphA.draw(); graphB.draw(); }
@@ -4566,6 +4928,44 @@ for (const id of _collapsedSet()) {
   const c = document.getElementById(id), b = c && c.querySelector('.collapse-btn');
   if (b) { c.classList.add('collapsed'); b.setAttribute('aria-expanded', 'false'); b.title = 'Expand'; }
 }
+
+// ─── keyboard & availability ──────────────────────────────────────────────────
+// Esc lets go of the selection, Del / Backspace deletes the selected qubit,
+// Ctrl/Cmd+Z undoes — on the graph last touched (always A outside compare
+// mode). Typing in a field or an open dialog keeps its keys.
+document.addEventListener('pointerdown', e => {
+  if (e.target.closest('#graphCardB, #opsCard_b_cmp')) activeGraph = graphB;
+  else if (e.target.closest('#graphCardA, #opsCard_a, #opsCard_a_cmp')) activeGraph = graphA;
+}, true);
+document.addEventListener('keydown', e => {
+  if (e.defaultPrevented || e.altKey) return;
+  if (e.target.closest && e.target.closest('input, textarea, select, [contenteditable]')) return;
+  if (document.querySelector('.modal-overlay')) return;
+  const g = comparisonMode ? activeGraph : graphA;
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (e.ctrlKey || e.metaKey) {
+    if (key === 'z' && !e.shiftKey) { e.preventDefault(); g.doUndo(); }
+    return;
+  }
+  if (g.selectedId === null) return;
+  if (key === 'Escape') { e.preventDefault(); g.deselect(); }
+  else if (key === 'Delete' || key === 'Backspace') { e.preventDefault(); g.doDelete(); }
+});
+
+// A greyed-out button still takes the click, to say what it is waiting for.
+document.addEventListener('click', e => {
+  const b = e.target.closest('button[aria-disabled="true"]');
+  if (!b) return;
+  const card = b.closest('.ops-card');
+  if (card) {
+    toast('Select a qubit first — click one on the canvas');
+    _replayAnim(card.querySelector('.ops-vertex-label'), 'nudge', 'nudge');
+  }
+});
+
+// The two-qubit gate is named in the canvas hint.
+for (const g of [graphA, graphB])
+  document.getElementById(`cgateSel_${g.side}`)?.addEventListener('change', () => g._syncUI(true));
 
 // ─── init ─────────────────────────────────────────────────────────────────────
 _syncThemeBtn();

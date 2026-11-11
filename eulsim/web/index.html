@@ -147,19 +147,18 @@
       border-bottom: 2px solid transparent;
     }
     .seg button:hover { color: var(--ink); background: transparent; filter:none; border-bottom-color: var(--line-strong); }
-    .seg button.active { color: var(--ink); font-weight:600; border-bottom-color: var(--accent); }
+    .seg button.active { color: var(--ink); font-weight:600; }
     button.mode-btn.active, .seg .ws-btn.active { pointer-events:none; cursor:default; }
-    /* Exclusive switches: one underline that slides to the option in force.
-       _syncSegIndicators() measures the active button; until it has run
-       (.ind-ready) the per-button underline above stays as the fallback. */
-    .seg.slide { position:relative; }
-    .seg.slide.ind-ready button.active { border-bottom-color: transparent; }
-    .seg.slide.ind-ready::after {
-      content:''; position:absolute; left:0; bottom:0; height:2px; width:1px;
-      background: var(--accent); transform-origin: 0 50%; pointer-events:none;
-      transform: translateX(var(--ind-x, 0px)) scaleX(var(--ind-w, 0));
+    /* The active underline is part of the button (over its own bottom border),
+       so it is aligned with the label by construction — no measuring. It grows
+       in from the centre when an option is switched on. */
+    .seg button { position:relative; }
+    .seg button::after {
+      content:''; position:absolute; left:0; right:0; bottom:-2px; height:2px;
+      background: var(--accent); pointer-events:none;
+      transform: scaleX(0); transition: transform .2s cubic-bezier(.3,.8,.2,1);
     }
-    .seg.slide.ind-anim::after { transition: transform .24s cubic-bezier(.3,.8,.2,1); }
+    .seg button.active::after { transform: scaleX(1); }
     .icon-btn {
       padding:5px 8px; font-size:.9rem; font-weight:400; color:var(--ink-2);
       background:transparent !important; border-color:transparent !important;
@@ -684,7 +683,7 @@
     <div class="tb-groups">
       <div class="tb-group" role="group" aria-label="Workspace">
         <span class="tb-label">Workspace</span>
-        <div class="seg slide">
+        <div class="seg">
           <button class="ws-btn active" id="singleModeBtn" onclick="setWorkspace('single')" title="One graph with the full inspector">Single</button>
           <button class="ws-btn" id="compareModeBtn" onclick="setWorkspace('compare')" title="Two graphs side by side: state equality, LC-equivalence, isomorphism">Compare</button>
           <button class="ws-btn" id="fusionModeBtn" onclick="setWorkspace('fusion')" title="Run a graph fusion between two qubits: local Cliffords, one CZ, two X measurements">Fusion</button>
@@ -692,7 +691,7 @@
       </div>
       <div class="tb-group" role="group" aria-label="View">
         <span class="tb-label">View</span>
-        <div class="seg slide">
+        <div class="seg">
           <button class="mode-btn" id="labelModeBtn" onclick="setViewMode('label')" title="Frame as the vertex basis (w^N, w^C) written above each vertex">Label</button>
           <!-- Colour mode is hidden for now: the vertex colours carry the Pauli
                letters but not their signs, so a negative image is indistinguishable
@@ -723,7 +722,7 @@
 
 <main class="wrap">
   <div class="cmp-tabs" id="cmpTabs">
-    <div class="seg slide" role="tablist" aria-label="Graph shown">
+    <div class="seg" role="tablist" aria-label="Graph shown">
       <button class="active" id="cmpTabA" onclick="setCmpTab('a')">Graph A</button>
       <button id="cmpTabB" onclick="setCmpTab('b')">Graph B</button>
     </div>
@@ -750,6 +749,7 @@
             <select id="cgateSel_a" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
           </label>
           <button class="tool small" onclick="exportPNG('a')" title="Download a PNG screenshot of this graph, cropped to its content">&#8595; PNG</button>
+          <button class="tool small" onclick="exportSheet('a')" title="Download a one-page PNG of the whole workspace: the graph, its supplementary and Eulerian vectors, graph properties, stabilizer generators and state vector">&#8595; Sheet</button>
         </div>
       </div>
       <div class="presets">
@@ -981,6 +981,7 @@
             <select id="cgateSel_b" class="sv-qsel"><option value="cz">CZ</option><option value="cx">CX</option><option value="cy">CY</option></select>
           </label>
           <button class="tool small" onclick="exportPNG('b')" title="Download a PNG screenshot of this graph, cropped to its content">&#8595; PNG</button>
+          <button class="tool small" onclick="exportSheet('b')" title="Download a one-page PNG of the whole workspace: the graph, its supplementary and Eulerian vectors, graph properties, stabilizer generators and state vector">&#8595; Sheet</button>
           <button class="sync-btn small" onclick="syncAtoB()" title="Copy Graph A layout into Graph B">A &rarr; B</button>
         </div>
       </div>
@@ -2982,6 +2983,8 @@ class GraphState {
   }
 
   _renderAll(data) {
+    if (data.stabilizers) this._lastStabs = data.stabilizers;
+    if (data.properties)  this._lastProps = data.properties;
     this._renderStabilizers(data.stabilizers);
     this._renderStateVector(data.state_vector, data.properties?.n ?? 0);
     this._renderProperties(data.properties);
@@ -4425,7 +4428,6 @@ function _syncViewMode() {
       `Label = (${bar}<sup>N</sup><sub>i</sub>, ${bar}<sup>C</sup><sub>i</sub>)`
       + ` = (${dag[0]}, ${dag[1]}) &mdash; Eulerian first`;
   }
-  _syncSegIndicators();
   graphA.draw();
   graphB.draw();
 }
@@ -4723,12 +4725,10 @@ function _exportName(g, side) {
   return `${mode}-${side.toUpperCase()}-${g.vertices.length}q-${stamp}.png`;
 }
 
-function exportPNG(side) {
-  const g   = side === 'b' ? graphB : graphA;
+// The graph as drawn, in the light print palette, cropped to its content:
+// resolves to {img, box} (box in canvas units) once the SVG has been decoded.
+function _graphImage(g, side) {
   const svg = g._svg();
-  if (!svg) return;
-  if (!g.vertices.length) { toast('Nothing to export — add a qubit first'); return; }
-
   // Redraw in the light print palette (white, no grid, no shadows) for the
   // snapshot, then restore the on-screen theme.
   CANVAS_EXPORT = true; applyCanvasTheme(); g.draw();
@@ -4739,14 +4739,37 @@ function exportPNG(side) {
   clone.setAttribute('viewBox', `${box.x} ${box.y} ${box.w} ${box.h}`);
   clone.setAttribute('width',  box.w);
   clone.setAttribute('height', box.h);
+  clone.removeAttribute('class');
   // Inherited page font for text drawn without an explicit family; label mode's
   // font-family presentation attribute still wins on its own elements.
   clone.setAttribute('style',
     'font-family:"Source Sans 3","Source Sans Pro","Segoe UI",sans-serif');
-
   const xml = new XMLSerializer().serializeToString(clone);
-  const img = new Image();
-  img.onload = () => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload  = () => resolve({img, box});
+    img.onerror = () => reject(new Error('could not rasterise the graph'));
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+  });
+}
+
+function _downloadCanvas(cv, name) {
+  cv.toBlob(blob => {
+    if (!blob) { toast('PNG export failed'); return; }
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    toast(`Saved ${name} (${cv.width}×${cv.height})`);
+  }, 'image/png');
+}
+
+function exportPNG(side) {
+  const g = side === 'b' ? graphB : graphA;
+  if (!g._svg()) return;
+  if (!g.vertices.length) { toast('Nothing to export — add a qubit first'); return; }
+  _graphImage(g, side).then(({img, box}) => {
     const cv  = document.createElement('canvas');
     cv.width  = Math.round(box.w * EXPORT_SCALE);
     cv.height = Math.round(box.h * EXPORT_SCALE);
@@ -4754,19 +4777,284 @@ function exportPNG(side) {
     ctx.fillStyle = '#ffffff';                       // force white bg for screenshots
     ctx.fillRect(0, 0, cv.width, cv.height);
     ctx.drawImage(img, 0, 0, cv.width, cv.height);
-    cv.toBlob(blob => {
-      if (!blob) { toast('PNG export failed'); return; }
-      const name = _exportName(g, side);
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
-      a.href = url; a.download = name;
-      document.body.appendChild(a); a.click(); a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-      toast(`Saved ${name} (${cv.width}×${cv.height})`);
-    }, 'image/png');
+    _downloadCanvas(cv, _exportName(g, side));
+  }).catch(() => toast('PNG export failed'));
+}
+
+// ─── Sheet export ─────────────────────────────────────────────────────────────
+// One PNG with everything that describes the state: the graph (the same
+// snapshot as ↓ PNG), the supplementary / Eulerian vectors, graph properties,
+// stabilizer generators and the state vector, under a small EulSim header.
+// It is laid out here rather than photographed from the page: always the light
+// print palette on white, a fixed width, no buttons — and the same sheet
+// whatever the screen, theme or panel order. Everything is drawn straight onto
+// a 2D canvas (the page's web fonts are available there, which they are not
+// inside an SVG image).
+const SHEET_W = 1040, SHEET_PAD = 36, SHEET_SCALE = 2, SHEET_MAX_H = 7000;
+const SHEET_COL = {
+  ink:'#2b2620', ink2:'#4d453b', muted:'#82786a', line:'#e0d8c9', accent:'#3d6b58', info:'#3a5a8c',
+  'p-x':'#2f6b5c', 'p-y':'#a0522d', 'p-z':'#6a3d7a',
+  'c-pos':'#2f6b45', 'c-neg':'#9a3328', 'c-ipos':'#5b4690', 'c-ineg':'#8a4a17',
+  'c-wpos':'#355f8a', 'c-wneg':'#8a6118', 'c-wbpos':'#2f6f74', 'c-wbneg':'#7a3d63', 'c-gen':'#5a5248',
+  warn:'#9a6a1c',
+};
+// Page classes that carry a colour (state-vector phases, basis signs, notes).
+const SHEET_CLS = {
+  'sv-pos':'c-pos', 'sv-neg':'c-neg', 'sv-ipos':'c-ipos', 'sv-ineg':'c-ineg', 'sv-wpos':'c-wpos',
+  'sv-wneg':'c-wneg', 'sv-wbpos':'c-wbpos', 'sv-wbneg':'c-wbneg', 'sv-gen':'c-gen',
+  'sv-bx':'p-x', 'sv-by':'p-y', 'sv-norm':'muted', 'hint':'muted', 'sv-warn':'warn',
+  pos:'c-pos', neg:'c-neg', ipos:'c-ipos', ineg:'c-ineg', wpos:'c-wpos', wneg:'c-wneg',
+  wbpos:'c-wbpos', wbneg:'c-wbneg',
+};
+const SHEET_FONT = {
+  sans:  '"Source Sans 3","Source Sans Pro","Segoe UI",sans-serif',
+  serif: '"Source Serif 4","Source Serif Pro",Charter,Cambria,Georgia,serif',
+  mono:  '"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace',
+};
+
+// The panels' HTML (stabilizer expressions, the state vector) as a flat list
+// of styled words: {t, color, bold, ital, mono, shift} with shift = −1 / +1
+// for sub / superscripts, and {brk:true} between blocks. Only the handful of
+// tags and classes those panels use are understood; anything else is plain.
+function _sheetRuns(html, base = {}) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const out = [];
+  const brk = () => { if (out.length && !out[out.length - 1].brk) out.push({brk: true}); };
+  const walk = (node, st) => {
+    if (node.nodeType === 3) {
+      for (const w of node.textContent.replace(/\s+/g, ' ').split(/( )/))
+        if (w) out.push({...st, t: w});
+      return;
+    }
+    if (node.nodeType !== 1) return;
+    const tag = node.tagName, ns = {...st};
+    if (tag === 'SUB') ns.shift = -1; else if (tag === 'SUP') ns.shift = 1;
+    if (tag === 'B' || tag === 'STRONG') ns.bold = true;
+    if (tag === 'EM' || tag === 'I') ns.ital = true;
+    for (const c of node.classList) {
+      if (SHEET_CLS[c]) ns.color = SHEET_COL[SHEET_CLS[c]];
+      if (c === 'sv-formula' || c === 'sv-group') ns.mono = true;
+      if (c === 'sv-group-label') { ns.bold = true; ns.mono = false; }
+    }
+    const m = /color:\s*var\(--([\w-]+)\)/.exec(node.getAttribute('style') || '');
+    if (m && SHEET_COL[m[1]]) ns.color = SHEET_COL[m[1]];
+    if (/font-weight:\s*700/.test(node.getAttribute('style') || '')) ns.bold = true;
+    const block = tag === 'DIV' || tag === 'P' || tag === 'LI' || tag === 'BR';
+    if (block) brk();
+    for (const c of node.childNodes) walk(c, ns);
+    if (block) brk();
   };
-  img.onerror = () => toast('PNG export failed');
-  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
+  for (const c of tpl.content.childNodes) walk(c, base);
+  while (out.length && out[out.length - 1].brk) out.pop();
+  return out;
+}
+
+// Flow runs into lines no wider than maxW, starting at (x, y) (y = top of the
+// first line). Draws when `ctx.sheetDraw` is set, always returns the y below
+// the last line — so a dry pass measures and a second one paints.
+function _sheetText(ctx, runs, x, y, maxW, o = {}) {
+  const size = o.size || 15, lh = o.lh || Math.round(size * 1.55), gap = o.gap ?? Math.round(size * 0.5);
+  const fontOf = r => {
+    const sz = r.shift ? size * 0.72 : size;
+    return `${r.ital ? 'italic ' : ''}${r.bold ? '700' : '400'} ${sz}px ${r.mono ? SHEET_FONT.mono : (o.family || SHEET_FONT.sans)}`;
+  };
+  let cx = x, line = [];
+  const flush = () => {
+    while (line.length && line[line.length - 1].r.t === ' ') line.pop();
+    if (ctx.sheetDraw) for (const {r, px} of line) {
+      ctx.font = fontOf(r); ctx.fillStyle = r.color || o.color || SHEET_COL.ink;
+      ctx.fillText(r.t, px, y + lh * 0.72 - (r.shift || 0) * size * (r.shift > 0 ? 0.38 : 0.22));
+    }
+    line = []; cx = x; y += lh;
+  };
+  for (const r of runs) {
+    if (r.brk) { if (line.length) flush(); y += gap; continue; }
+    ctx.font = fontOf(r);
+    const w = ctx.measureText(r.t).width;
+    if (r.t === ' ' && !line.length) continue;
+    if (cx + w > x + maxW && line.length && r.t !== ' ') flush();
+    line.push({r, px: cx}); cx += w;
+  }
+  if (line.length) flush();
+  return y;
+}
+
+// Section heading with a hairline; returns the y below it.
+function _sheetHead(ctx, title, x, y, w) {
+  if (ctx.sheetDraw) {
+    ctx.font = `600 17px ${SHEET_FONT.serif}`; ctx.fillStyle = SHEET_COL.ink; ctx.textAlign = 'left';
+    ctx.fillText(title, x, y + 16);
+    ctx.fillStyle = SHEET_COL.line; ctx.fillRect(x, y + 26, w, 1);
+  }
+  return y + 40;
+}
+
+// One column per qubit — name, w^C, w^N — as in the vectors panel.
+function _sheetVectors(ctx, g, x, y, w) {
+  const CH = 24, GAP = 4, HEAD = 46;
+  const signed = ([sg, p]) => (sg < 0 ? '−' : '+') + p;
+  const chip = (cx, cy, cw, text, fg, bg) => {
+    if (!ctx.sheetDraw) return;
+    ctx.fillStyle = bg; ctx.beginPath(); ctx.roundRect(cx, cy, cw, CH, 4); ctx.fill();
+    ctx.fillStyle = fg; ctx.textAlign = 'center'; ctx.fillText(text, cx + cw / 2, cy + 16.5); ctx.textAlign = 'left';
+  };
+  const heads = () => {
+    if (!ctx.sheetDraw) return;
+    const wch = dualBasis ? 'w̄' : 'w';
+    ctx.fillStyle = SHEET_COL.muted; ctx.textAlign = 'left';
+    [['Qubit', ''], [wch, 'C'], [wch, 'N']].forEach(([t, sup], k) => {
+      const ty = y + k * (CH + GAP) + 16.5;
+      ctx.font = `italic 400 14px ${SHEET_FONT.serif}`; ctx.fillText(t, x, ty);
+      if (sup) { const tw = ctx.measureText(t).width; ctx.font = `italic 400 10px ${SHEET_FONT.serif}`; ctx.fillText(sup, x + tw + 1, ty - 6); }
+    });
+  };
+  heads();
+  let cx = x + HEAD;
+  for (const v of g.vertices) {
+    const U = _displayU(v.localU || CLIFFORD_I);
+    const c = _conjugatedPauli(U, PAULI_X_MAT), nb = _conjugatedPauli(U, PAULI_Z_MAT);
+    ctx.font = `700 13px ${SHEET_FONT.mono}`;
+    const cw = Math.max(36, Math.ceil(ctx.measureText(v.label).width) + 14);
+    if (cx + cw > x + w && cx > x + HEAD) { cx = x + HEAD; y += 3 * (CH + GAP) + 10; heads(); ctx.font = `700 13px ${SHEET_FONT.mono}`; }
+    chip(cx, y, cw, v.label, '#ffffff', SHEET_COL.ink);
+    [c, nb].forEach((pp, k) => {
+      const col = SHEET_COL['p-' + pp[1].toLowerCase()] || SHEET_COL.ink;
+      chip(cx, y + (k + 1) * (CH + GAP), cw, signed(pp), col, col + '24');
+    });
+    cx += cw + GAP;
+  }
+  y += 3 * (CH + GAP) + 4;
+  const wch = dualBasis ? 'w̄' : 'w';
+  const key = `<i>${wch}<sup>C</sup> — supplementary vector, centre (${dualBasis ? 'U†XU' : 'UXU†'}) · `
+            + `${wch}<sup>N</sup> — Eulerian vector, neighbour (${dualBasis ? 'U†ZU' : 'UZU†'})</i>`;
+  return _sheetText(ctx, _sheetRuns(key), x, y, w, {size: 12.5, color: SHEET_COL.muted, family: SHEET_FONT.serif});
+}
+
+function _sheetProps(ctx, g, x, y, w) {
+  const p = g._lastProps;
+  if (!p) return y;
+  const items = [['Qubits (n)', p.n], ['Edges (m)', p.m], ['Connected', p.connected ? 'yes' : 'no'], ['Max degree', p.max_degree ?? 0]];
+  const cw = w / items.length;
+  if (ctx.sheetDraw) items.forEach(([k, v], i) => {
+    ctx.textAlign = 'left';
+    ctx.font = `italic 400 12.5px ${SHEET_FONT.sans}`; ctx.fillStyle = SHEET_COL.muted; ctx.fillText(k, x + i * cw, y + 12);
+    ctx.font = `600 20px ${SHEET_FONT.serif}`;         ctx.fillStyle = SHEET_COL.ink;   ctx.fillText(String(v), x + i * cw, y + 36);
+  });
+  y += 50;
+  const parts = [];
+  if (p.tags?.length) parts.push(`<span style="color:var(--info)"><b>${p.tags.map(escapeHtml).join(' · ')}</b></span>`);
+  if (p.degrees?.length) parts.push(`<p class="hint">Degrees: [${p.degrees.join(', ')}]</p>`);
+  return parts.length ? _sheetText(ctx, _sheetRuns(parts.join('<br>')), x, y, w, {size: 13.5, gap: 2}) : y;
+}
+
+function _sheetStabs(ctx, g, x, y, w) {
+  const stabs = g._lastStabs || [];
+  for (const st of stabs) {
+    const runs = _sheetRuns(`<span style="color:var(--info)"><b>S<sub>${escapeHtml(st.label)}</sub></b></span> = ${st.compact}`);
+    ctx.font = `400 12.5px ${SHEET_FONT.mono}`;
+    const pw = ctx.measureText(st.pauli).width;
+    // The Pauli word sits right-aligned on the expression's last line when
+    // there is room, on a line of its own when not.
+    const y1 = _sheetText(ctx, runs, x, y, w - pw - 18, {size: 14.5, lh: 24});
+    const oneLine = y1 - y <= 24 && pw < w * 0.5;
+    const y2 = oneLine ? y1 : _sheetText(ctx, runs, x, y, w, {size: 14.5, lh: 24});
+    const py = oneLine ? y + 17 : y2 + 14;
+    if (ctx.sheetDraw) {
+      ctx.font = `400 12.5px ${SHEET_FONT.mono}`; ctx.fillStyle = SHEET_COL.muted;
+      if (oneLine) { ctx.textAlign = 'right'; ctx.fillText(st.pauli, x + w, py); ctx.textAlign = 'left'; }
+      else ctx.fillText(st.pauli, x, py);
+    }
+    y = (oneLine ? y1 : y2 + 20) + 5;
+    if (ctx.sheetDraw) { ctx.fillStyle = SHEET_COL.line; ctx.fillRect(x, y - 3, w, 1); }
+  }
+  return y;
+}
+
+// The header: the E-graph logo, the name, and what the sheet shows.
+function _sheetHeader(ctx, g, side, x, y, w) {
+  if (!ctx.sheetDraw) return y + 62;
+  const L = 1.5;                                   // logo scale: 30-unit artwork → 45 px
+  const P = (ux, uy) => [x + ux * L, y + uy * L];
+  ctx.strokeStyle = SHEET_COL.ink; ctx.lineWidth = 1.3 * L; ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (const [a, b] of [[[6.5, 4.5], [6.5, 25.5]], [[6.5, 4.5], [24.5, 4.5]], [[6.5, 15], [20, 15]], [[6.5, 25.5], [24.5, 25.5]]]) {
+    ctx.moveTo(...P(...a)); ctx.lineTo(...P(...b));
+  }
+  ctx.stroke();
+  for (const [ux, uy, acc] of [[6.5, 4.5], [6.5, 15], [6.5, 25.5], [24.5, 4.5], [24.5, 25.5], [20, 15, 1]]) {
+    ctx.beginPath(); ctx.arc(...P(ux, uy), 2.3 * L, 0, 2 * Math.PI);
+    ctx.fillStyle = acc ? SHEET_COL.accent : '#ffffff'; ctx.fill();
+    ctx.strokeStyle = acc ? SHEET_COL.accent : SHEET_COL.ink; ctx.stroke();
+  }
+  ctx.textAlign = 'left'; ctx.fillStyle = SHEET_COL.ink;
+  ctx.font = `600 25px ${SHEET_FONT.serif}`; ctx.fillText('EulSim', x + 58, y + 22);
+  ctx.font = `italic 400 14.5px ${SHEET_FONT.serif}`; ctx.fillStyle = SHEET_COL.muted;
+  ctx.fillText('Eulerian Frame Simulator', x + 58, y + 41);
+  const n = g.vertices.length, m = g.edges.size;
+  const view = graphOnly ? 'graph only' : zxMode ? 'ZX view' : cliffordMode ? 'Clifford view' : labelMode ? 'label view' : 'colour view';
+  ctx.textAlign = 'right';
+  ctx.font = `600 15px ${SHEET_FONT.sans}`; ctx.fillStyle = SHEET_COL.ink2;
+  ctx.fillText(`${comparisonMode ? `Graph ${side.toUpperCase()} · ` : ''}${n} qubit${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}`, x + w, y + 20);
+  ctx.font = `400 13px ${SHEET_FONT.sans}`; ctx.fillStyle = SHEET_COL.muted;
+  ctx.fillText(`${view}${dualBasis && !graphOnly ? ', dual basis' : ''} · ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, x + w, y + 40);
+  ctx.textAlign = 'left';
+  ctx.fillStyle = SHEET_COL.line; ctx.fillRect(x, y + 54, w, 1);
+  return y + 62;
+}
+
+// Lay the whole sheet out on `ctx`; returns its height. Called twice: a dry
+// pass for the height, then for real.
+function _sheetLayout(ctx, g, side, shot) {
+  const x = SHEET_PAD, W = SHEET_W - 2 * SHEET_PAD;
+  let y = _sheetHeader(ctx, g, side, x, SHEET_PAD, W) + 14;
+
+  // The graph, as large as it comfortably goes.
+  const k = Math.min(W / shot.box.w, 460 / shot.box.h, 1.9);
+  const gw = shot.box.w * k, gh = shot.box.h * k;
+  if (ctx.sheetDraw) ctx.drawImage(shot.img, x + (W - gw) / 2, y, gw, gh);
+  y += gh + 22;
+
+  // Two columns: vectors and properties | stabilizer generators.
+  const GUT = 36, cw = (W - GUT) / 2;
+  let yl = y, yr = y;
+  if (!graphOnly) {
+    yl = _sheetHead(ctx, `Supplementary & Eulerian vectors${dualBasis ? ' (dual)' : ''}`, x, yl, cw);
+    yl = _sheetVectors(ctx, g, x, yl, cw) + 22;
+  }
+  yl = _sheetHead(ctx, 'Graph properties', x, yl, cw);
+  yl = _sheetProps(ctx, g, x, yl, cw);
+  yr = _sheetHead(ctx, 'Stabilizer generators', x + cw + GUT, yr, cw);
+  yr = _sheetStabs(ctx, g, x + cw + GUT, yr, cw);
+  y = Math.max(yl, yr) + 24;
+
+  // State vector: what its panel shows, global phase included.
+  const svHtml = document.getElementById(g._svPanelId())?.innerHTML || '';
+  y = _sheetHead(ctx, 'State vector', x, y, W);
+  y = _sheetText(ctx, _sheetRuns(svHtml), x, y, W, {size: 14, gap: 6});
+  return y + SHEET_PAD;
+}
+
+async function exportSheet(side) {
+  const g = side === 'b' ? graphB : graphA;
+  if (!g._svg()) return;
+  if (!g.vertices.length) { toast('Nothing to export — add a qubit first'); return; }
+  try {
+    if (document.fonts && document.fonts.ready) await document.fonts.ready;
+    const shot = await _graphImage(g, side);
+    const cv = document.createElement('canvas'), ctx = cv.getContext('2d');
+    ctx.sheetDraw = false;
+    const h = Math.min(SHEET_MAX_H, Math.ceil(_sheetLayout(ctx, g, side, shot)));
+    cv.width = SHEET_W * SHEET_SCALE; cv.height = h * SHEET_SCALE;      // resizing resets the context
+    ctx.scale(SHEET_SCALE, SHEET_SCALE);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, SHEET_W, h);
+    ctx.sheetDraw = true;
+    _sheetLayout(ctx, g, side, shot);
+    _downloadCanvas(cv, _exportName(g, side).replace(/^[a-z]+-/, 'sheet-'));
+  } catch (e) {
+    console.error(e);
+    toast('Sheet export failed');
+  }
 }
 
 // ─── QR code (byte mode, ECC level M, versions 1-10) ─────────────────────────
@@ -5149,7 +5437,6 @@ function _syncWorkspace() {
   }
   document.body.classList.toggle('ws-compare', ws === 'compare');
   document.body.classList.toggle('ws-fusion',  ws === 'fusion');
-  _syncSegIndicators();
 }
 
 // Restart a one-shot CSS animation class on an element. `name` is the keyframe
@@ -5168,29 +5455,11 @@ function _replayAnim(node, cls, name) {
   node.addEventListener('animationend', done);
 }
 
-// Place the sliding underline of every exclusive switch under its active
-// button. The first placement is not animated (nothing to slide from).
-function _syncSegIndicators() {
-  for (const seg of document.querySelectorAll('.seg.slide')) {
-    const b = seg.querySelector('button.active');
-    if (!b || !b.offsetWidth) continue;      // hidden (compare tabs on a wide screen)
-    seg.style.setProperty('--ind-x', `${b.offsetLeft}px`);
-    seg.style.setProperty('--ind-w', b.offsetWidth);
-    if (!seg.classList.contains('ind-ready')) {
-      seg.classList.add('ind-ready');
-      requestAnimationFrame(() => requestAnimationFrame(() => seg.classList.add('ind-anim')));
-    }
-  }
-}
-window.addEventListener('resize', _syncSegIndicators);
-if (document.fonts && document.fonts.ready) document.fonts.ready.then(_syncSegIndicators);
-
 // Narrow screens show one compare graph at a time.
 function setCmpTab(side) {
   document.body.dataset.cmpTab = side;
   document.getElementById('cmpTabA').classList.toggle('active', side === 'a');
   document.getElementById('cmpTabB').classList.toggle('active', side === 'b');
-  _syncSegIndicators();
   activeGraph = side === 'b' ? graphB : graphA;
   syncDock();
   (side === 'b' ? graphB : graphA).draw();    // label headers need a laid-out SVG

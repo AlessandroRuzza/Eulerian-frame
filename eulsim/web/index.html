@@ -308,7 +308,7 @@
     .preset-list .spacing-btn { color: var(--accent-strong); font-style:italic; }
     .canvas-wrap { position:relative; }
     .graph-svg {
-      width:100%; height:auto; display:block; border-radius:var(--radius-sm);
+      width:100%; height:auto; aspect-ratio: 680 / 430; display:block; border-radius:var(--radius-sm);
       border:1px solid var(--line); cursor:crosshair; touch-action:none;
       background: var(--surface-2);
     }
@@ -332,6 +332,19 @@
       background: color-mix(in srgb, var(--surface) 82%, transparent);
     }
     .canvas-stat:empty { display:none; }
+    /* Zoom controls, bottom-left of the canvas. Quiet until wanted on a
+       desktop; full strength on touch, where they are also the fallback for
+       pinching. */
+    .canvas-zoom { position:absolute; left:8px; bottom:8px; display:flex; gap:4px; opacity:.5; transition:opacity .15s; }
+    .canvas-wrap:hover .canvas-zoom, .canvas-zoom:focus-within { opacity:1; }
+    .canvas-zoom button {
+      width:28px; height:28px; padding:0; display:grid; place-items:center;
+      font-family: var(--mono); font-size:1rem; font-weight:400; line-height:1; color: var(--ink-2);
+      background: color-mix(in srgb, var(--surface) 90%, transparent); border:1px solid var(--line-strong);
+    }
+    .canvas-zoom button:hover { background: var(--surface-2); color: var(--ink); filter:none; }
+    .canvas-zoom svg { width:14px; height:14px; }
+    .touch-only { display:none; }
     .hint { margin:8px 0 0; font-size:.86rem; color:var(--muted); line-height:1.5; }
     .hint kbd { font: inherit; font-weight:600; color:var(--ink-2); }
     .hint kbd.key {
@@ -544,12 +557,43 @@
     .qr-holder svg { max-width:100%; height:auto; border-radius:var(--radius); border:1px solid var(--line); }
     .qr-url { margin:10px 0 0; font-family:var(--mono); font-size:.78rem; color:var(--muted); word-break:break-all; }
 
+    /* ── Operations dock ───────────────────────────────────────────────── */
+    /* Single-column layouts put the Operations card a screen below the canvas:
+       select a qubit, scroll down, tap, scroll back to see what it did. There
+       the common operations ride along in a bar pinned to the bottom of the
+       screen for as long as a qubit is selected. Wide layouts never show it. */
+    .ops-dock { display:none; }
+    .dock-head { display:flex; align-items:center; gap:8px; margin-bottom:8px; min-width:0; }
+    .dock-head .side-badge:empty { display:none; }
+    .dock-desc { flex:1; min-width:0; font-size:.82rem; color:var(--muted);
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+    /* Each set wraps as a unit. */
+    .dock-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px 14px; }
+    .dock-set { display:inline-flex; align-items:center; gap:6px; }
+    .dock-lbl { font-family: var(--serif); font-style:italic; font-size:.86rem; color:var(--muted); }
+
     /* ── Responsive ────────────────────────────────────────────────────── */
     @media (max-width: 1099px) {
       .layout { grid-template-columns: minmax(0,1fr); }
       .right-stack { display:grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+      .ops-dock {
+        display:block; position:fixed; left:0; right:0; bottom:0; z-index:60;
+        background: var(--surface); border-top:1px solid var(--line-strong);
+        box-shadow: 0 -10px 28px rgba(0,0,0,.14);
+        padding: 8px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+        transform: translateY(105%); visibility:hidden;
+        transition: transform .2s cubic-bezier(.3,.8,.2,1), visibility 0s .2s;
+      }
+      body.has-sel .ops-dock { transform:none; visibility:visible; transition: transform .2s cubic-bezier(.3,.8,.2,1); }
+      /* Room to scroll the last panel clear of the dock; toasts sit above it. */
+      body.has-sel .wrap  { padding-bottom: calc(var(--dock-h, 150px) + 24px); }
+      body.has-sel #toast { bottom: calc(var(--dock-h, 150px) + 12px); }
     }
     @media (max-width: 899px) {
+      /* The bar is two rows tall here: let it scroll away instead of pinning
+         a fifth of a phone screen. */
+      .topbar { position: static; }
+      .graph-svg { max-height: 72vh; max-height: 72svh; }
       .topbar-in { padding: 8px 16px; }
       /* One scrolling row of switches; the right edge fades out to show there is more. */
       .tb-groups { order: 3; width: 100%; overflow-x: auto; flex-wrap: nowrap; scrollbar-width: none;
@@ -570,9 +614,20 @@
       .graph-sub-panel { grid-column: 1 / -1 !important; }
       .right-stack { display:flex; }
     }
-    @media (max-width: 560px) {
+    /* Phones — upright, or on their side (short and touch-first). */
+    @media (max-width: 560px), (max-height: 520px) and (pointer: coarse) {
       .brand-sub, .tb-long { display:none; }
-      .toolbar { margin-left:0; width:100%; }
+      /* Taller canvas: a phone has height to spare and no width. The graph
+         is fitted into it (GraphState.fitView) and can be pinched / panned. */
+      .graph-svg { aspect-ratio: 5 / 6; max-height: 68vh; max-height: 68svh; }
+      /* Tools in one scrolling row (as the presets below them) instead of three wrapped ones. */
+      .toolbar { margin-left:0; width:100%; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none;
+                 padding-right:26px;
+                 -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent);
+                         mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent); }
+      .toolbar::-webkit-scrollbar { display:none; }
+      .toolbar > *, .tool-group > * { flex:none; }
+      .tool-group { flex-wrap:nowrap; }
       .tsep { display:none; }
       .presets { flex-direction:column; gap:4px; }
       .presets-label { padding-top:0; }
@@ -581,6 +636,25 @@
       .card { padding: 12px 12px 14px; }
       .props-grid { grid-template-columns: 1fr 1fr; }
     }
+    /* Touch: finger-sized targets; 16px form text (smaller makes iOS zoom the
+       page on focus); no affordances that need a mouse — panels are reordered
+       with HTML5 drag-and-drop, which touch does not fire. */
+    @media (pointer: coarse) {
+      button, select { min-height:38px; }
+      button.small { padding:7px 12px; font-size:.9rem; }
+      .preset-list button { padding:6px 12px; font-size:.9rem; }
+      .seg button { padding:9px 10px 11px; }
+      select, input[type=number], input[type=text] { font-size:16px; padding:6px 8px; }
+      .num-input { width:100px; } .num-input.sm { width:72px; }
+      .collapse-btn { width:38px; height:38px; font-size:.95rem; }
+      .canvas-zoom { opacity:1; gap:6px; }
+      .canvas-zoom button { width:38px; height:38px; }
+      .meas-toggle { padding:6px 0; margin-top:2px; }
+      details.legend-details > summary { padding:8px 0; font-size:.84rem; }
+      .sv-basis-ctrl button { min-width:40px; }
+      .drag-handle, #resetLayoutBtn { display:none; }
+    }
+    @media (hover: none) { .touch-only { display:inline; } }
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after { animation: none !important; transition: none !important; }
       .graph-svg .e-ghost { display:none; }
@@ -700,7 +774,12 @@
           <button class="ghost small" onclick="graphA.loadPreset('kl')" title="Triangle + three L-shaped 3-paths (12 qubits)">K-L</button>
         </div>
       </div>
-      <div class="canvas-wrap"><svg id="graphSvgA" class="graph-svg" viewBox="0 0 680 430"></svg><div class="canvas-stat" id="canvasStatA"></div></div>
+      <div class="canvas-wrap"><svg id="graphSvgA" class="graph-svg" viewBox="0 0 680 430"></svg><div class="canvas-stat" id="canvasStatA"></div>
+        <div class="canvas-zoom" role="group" aria-label="Zoom">
+          <button onclick="graphA.zoomAt(1/1.4)" title="Zoom out" aria-label="Zoom out">&minus;</button>
+          <button onclick="graphA.fitView()" title="Fit the graph in view" aria-label="Fit the graph in view"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
+          <button onclick="graphA.zoomAt(1.4)" title="Zoom in (pinch, or Ctrl + wheel)" aria-label="Zoom in">+</button>
+        </div></div>
       <p class="hint canvas-hint" id="canvasHintA" aria-live="polite">Each qubit starts in |+&rang;; each edge is a CZ.</p>
       <details class="legend-details">
         <summary>Legend</summary>
@@ -927,7 +1006,12 @@
           <button class="ghost small" onclick="graphB.loadPreset('kl')" title="Triangle + three L-shaped 3-paths (12 qubits)">K-L</button>
         </div>
       </div>
-      <div class="canvas-wrap"><svg id="graphSvgB" class="graph-svg" viewBox="0 0 680 430"></svg><div class="canvas-stat" id="canvasStatB"></div></div>
+      <div class="canvas-wrap"><svg id="graphSvgB" class="graph-svg" viewBox="0 0 680 430"></svg><div class="canvas-stat" id="canvasStatB"></div>
+        <div class="canvas-zoom" role="group" aria-label="Zoom">
+          <button onclick="graphB.zoomAt(1/1.4)" title="Zoom out" aria-label="Zoom out">&minus;</button>
+          <button onclick="graphB.fitView()" title="Fit the graph in view" aria-label="Fit the graph in view"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10"/></svg></button>
+          <button onclick="graphB.zoomAt(1.4)" title="Zoom in (pinch, or Ctrl + wheel)" aria-label="Zoom in">+</button>
+        </div></div>
       <p class="hint canvas-hint" id="canvasHintB" aria-live="polite"></p>
       <details class="legend-details">
         <summary>Legend</summary>
@@ -1153,6 +1237,41 @@
 
   </div><!-- #mainLayout -->
 </main>
+
+<!-- Operations on the selected qubit, pinned to the bottom of single-column
+     layouts (see "Operations dock" in the stylesheet). Buttons go through
+     dockOp() to whichever graph holds the selection. -->
+<div class="ops-dock" id="opsDock" role="toolbar" aria-label="Operations on the selected qubit">
+  <div class="dock-head">
+    <span class="side-badge" id="dockSide"></span>
+    <span class="sel-pill" id="dockPill"></span>
+    <span class="dock-desc" id="dockDesc"></span>
+    <button class="ghost small" onclick="dockMore()" title="Go to the Operations panel: every operation and the measurement options">More</button>
+    <button class="ghost small" onclick="_dockGraph().deselect()" title="Deselect" aria-label="Deselect">&times;</button>
+  </div>
+  <div class="dock-row">
+    <span class="dock-set">
+      <button class="sec small" onclick="dockOp('doLC')" title="Local complement &tau;: HSH on the qubit, S&dagger; on its neighbours">LC &tau;</button>
+      <button class="sec small" onclick="dockOp('doReframe')" title="Re-frame R_v: same state, complemented neighbourhood">R<sub>v</sub></button>
+    </span>
+    <span class="dock-set" data-frame-ops="1">
+      <button class="ghost small" onclick="dockOp('doGate','H')">H</button>
+      <button class="ghost small" onclick="dockOp('doGate','S')">S</button>
+      <button class="ghost small" onclick="dockOp('doGate','SDG')">S&dagger;</button>
+      <button class="ghost small" onclick="dockOp('doGate','HSH')">HSH</button>
+    </span>
+    <span class="dock-set">
+      <span class="dock-lbl">Measure</span>
+      <button class="warn small" onclick="dockOp('doMeasure','z')">Z</button>
+      <button class="warn small" onclick="dockOp('doMeasure','y')">Y</button>
+      <button class="warn small" onclick="dockOp('doMeasure','x')">X</button>
+    </span>
+    <span class="dock-set">
+      <button class="ghost small" onclick="dockOp('doRename')">Rename&hellip;</button>
+      <button class="danger small" onclick="dockOp('doDelete')">Delete</button>
+    </span>
+  </div>
+</div>
 
 <div id="toast" role="status" aria-live="polite"></div>
 
@@ -1390,6 +1509,16 @@ function toast(msg, dur = 2200) {
 // when it started, and a rebuild re-adds the class with a negative
 // animation-delay equal to its age — the animation simply carries on.
 const _reducedMotion = window.matchMedia ? matchMedia('(prefers-reduced-motion: reduce)') : {matches: false};
+const _coarse = window.matchMedia ? matchMedia('(pointer: coarse)') : {matches: false};   // touch-first device
+const ZOOM_MAX = 2.4;        // closest zoom: screen px per canvas unit
+// The whole canvas drawn smaller than this (screen px per canvas unit) is
+// shown fitted to the graph instead: on touch screens, where a qubit has to be
+// hit with a finger, and on any screen once it is really small. The gap between
+// the two keeps a desktop's side-by-side compare canvases (≥ 0.57) whole, so A
+// and B stay at the same scale.
+const FIT_BELOW = 0.8, FIT_BELOW_ANY = 0.55;
+const FIT_ZOOM_MAX = 1.5;    // fitting a small graph does not go closer than this
+const TOUCH_PX = 44;         // smallest touch target for a vertex
 const V_IN_MS = 260, E_IN_MS = 300, GHOST_MS = 380, FLASH_MS = 750, RING_MS = 9000, FADE_OUT_MS = 280;
 function _animOn() { return !CANVAS_EXPORT && !_reducedMotion.matches; }
 // Start `cls` on a node as if it had begun `age` ms ago (negative: starts later).
@@ -1695,6 +1824,12 @@ class GraphState {
     this._fadeT = 0;
     this._previewTo = null;      // vertex the two-qubit-gate preview points at
     this._uiKey = '';
+    // Region of the 680×430 canvas on screen, {x, y, w, h} in canvas units, or
+    // null for all of it (the default wherever there is room). See "View".
+    this.view = null;
+    this._userView = false;      // the view was set by hand (pinch, pan, zoom) rather than fitted
+    this._boxKey = '';
+    this._hitRNow = 0;           // touch-disc radius of the last draw
 
     this._bindEvents();
   }
@@ -1786,7 +1921,8 @@ class GraphState {
     const sel = this.selectedId === null ? null : this.vertices.find(v => v.id === this.selectedId);
     const gate = (document.getElementById(`cgateSel_${this.side}`)?.value || 'cz').toUpperCase();
     const n = this.vertices.length, m = this.edges.size;
-    const key = [comparisonMode, sel ? sel.id + sel.label : '', this.history.length > 0, n, m, gate].join('|');
+    const nbSig = sel ? this.vertices.filter(u => u.id !== sel.id && this.hasEdge(sel.id, u.id)).map(u => u.id).join(',') : '';
+    const key = [comparisonMode, sel ? sel.id + sel.label : '', nbSig, this.history.length > 0, n, m, gate].join('|');
     if (!force && key === this._uiKey) return;
     this._uiKey = key;
     const S = this.side.toUpperCase();
@@ -1799,20 +1935,24 @@ class GraphState {
     const stat = document.getElementById(`canvasStat${S}`);
     if (stat) stat.textContent = n ? `${n} qubit${n === 1 ? '' : 's'} · ${m} edge${m === 1 ? '' : 's'}` : '';
 
+    syncDock();
+
     const hint = document.getElementById(`canvasHint${S}`);
     if (!hint) return;
     const K = s => `<kbd class="key">${s}</kbd>`;
+    const Tap = _coarse.matches ? 'Tap' : 'Click', tap = Tap.toLowerCase();
     if (sel) {
       hint.innerHTML = `<b>${escapeHtml(sel.label)}</b> selected &mdash; `
-        + `<kbd>click another qubit</kbd> to apply ${gate} &middot; `
-        + `<kbd>click empty space</kbd><span class="kbd-only"> or ${K('Esc')}</span> deselect`
+        + `<kbd>${tap} another qubit</kbd> to apply ${gate} &middot; `
+        + `<kbd>${tap} empty space</kbd><span class="kbd-only"> or ${K('Esc')}</span> deselect`
         + `<span class="kbd-only"> &middot; ${K('Del')} delete</span>`;
     } else if (!n) {
       hint.innerHTML = `Each qubit starts in |+&rang;; each edge is a CZ. &nbsp;`
-        + `<kbd>Click the canvas</kbd> to place a qubit, or load a preset.`;
+        + `<kbd>${Tap} the canvas</kbd> to place a qubit, or load a preset.`;
     } else {
-      hint.innerHTML = `<kbd>Click empty space</kbd> add qubit &middot; <kbd>Click a qubit</kbd> select, `
+      hint.innerHTML = `<kbd>${Tap} empty space</kbd> add qubit &middot; <kbd>${Tap} a qubit</kbd> select, `
         + `then a second one for ${gate} &middot; <kbd>Drag</kbd> move`
+        + `<span class="touch-only"> &middot; <kbd>Pinch</kbd> zoom &middot; <kbd>Drag empty space</kbd> pan</span>`
         + `<span class="kbd-only"> &middot; ${K('Ctrl')}+${K('Z')} undo</span>`;
     }
   }
@@ -1837,6 +1977,118 @@ class GraphState {
     t.textContent = (document.getElementById(`cgateSel_${this.side}`)?.value || 'cz').toUpperCase();
     g.appendChild(t);
     svg.insertBefore(g, svg.querySelector('g[data-vid]'));
+  }
+
+  // ── View: zoom, pan, fit ─────────────────────────────────────────────────────
+  // Positions live in a fixed 680×430 canvas; on a phone, drawn whole, that is
+  // half-size — 9 px qubits. So the SVG shows a *region* of the canvas instead
+  // (its viewBox), always with the element's own aspect ratio: fitted to the
+  // graph where the whole canvas would come out too small, and movable by
+  // pinch, drag on empty space, Ctrl+wheel and the zoom buttons everywhere.
+  // Nothing else changes — positions, clamping to the canvas and PNG export
+  // (which sets its own viewBox on a clone) are as before.
+  _box() {
+    const r = this._svg()?.getBoundingClientRect();
+    return r && r.width > 0 && r.height > 0 ? r : null;       // null while hidden
+  }
+  // The region that shows the entire canvas in this element (letterboxed if
+  // the element is not 680:430).
+  _wholeView(box) {
+    const asp = box.height / box.width;
+    const w = Math.max(SVG_W, SVG_H / asp), h = w * asp;
+    return {x: (SVG_W - w) / 2, y: (SVG_H - h) / 2, w, h};
+  }
+  _curView(box) { return this.view || this._wholeView(box); }
+  // Is the whole canvas legible in this element? (A phone, either way up, says no.)
+  _roomy(box) {
+    return box.width / this._wholeView(box).w >= (_coarse.matches ? FIT_BELOW : FIT_BELOW_ANY);
+  }
+  // Widest: the whole canvas. Narrowest: ZOOM_MAX screen px per canvas unit.
+  _clampW(w, box) {
+    const wMax = this._wholeView(box).w;
+    return Math.max(Math.min(wMax, box.width / ZOOM_MAX), Math.min(wMax, w));
+  }
+  // Show the region with top-left (x, y) and width w; the height follows from
+  // the element, and the region is kept on the canvas.
+  _setView({x, y, w}, box) {
+    const svg = this._svg();
+    w = this._clampW(w, box);
+    const h = w * box.height / box.width;
+    x = w >= SVG_W ? (SVG_W - w) / 2 : Math.max(0, Math.min(SVG_W - w, x));
+    y = h >= SVG_H ? (SVG_H - h) / 2 : Math.max(0, Math.min(SVG_H - h, y));
+    const whole = Math.abs(w - SVG_W) < 0.5 && Math.abs(h - SVG_H) < 0.5;
+    this.view = whole ? null : {x, y, w, h};
+    svg.setAttribute('viewBox', whole ? `0 0 ${SVG_W} ${SVG_H}` : `${x} ${y} ${w} ${h}`);
+  }
+  // Screen px per canvas unit right now.
+  _scale(box) { return box.width / this._curView(box).w; }
+
+  // Zoom by `f` (> 1 = closer) about a screen point — default: the centre.
+  zoomAt(f, cx, cy) {
+    const box = this._box();
+    if (!box) return;
+    const v = this._curView(box);
+    const fx = cx === undefined ? 0.5 : (cx - box.left) / box.width;
+    const fy = cy === undefined ? 0.5 : (cy - box.top) / box.height;
+    const w = this._clampW(v.w / f, box), h = w * box.height / box.width;
+    this._setView({x: v.x + fx * (v.w - w), y: v.y + fy * (v.h - h), w}, box);
+    this._userView = this.view !== null;
+    this.draw();
+  }
+
+  // Choose the region to show. Where the whole canvas is legible, that is the
+  // whole canvas; where it is not (a phone), the graph with a margin, or — on
+  // an empty canvas — the middle of it at 1:1, a comfortable place to start.
+  _fit(box) {
+    this._userView = false;
+    if (this._roomy(box)) { this._setView(this._wholeView(box), box); return; }
+    const asp = box.height / box.width;
+    let cx = SVG_W / 2, cy = SVG_H / 2, w = box.width;
+    if (this.vertices.length) {
+      const xs = this.vertices.map(v => v.x), ys = this.vertices.map(v => v.y);
+      const pad = zxMode && !graphOnly ? R + 62 : R + 28;     // ZX output wires reach further
+      const x0 = Math.min(...xs) - pad, x1 = Math.max(...xs) + pad;
+      const y0 = Math.min(...ys) - Math.max(pad, LBL_DY + 24), y1 = Math.max(...ys) + pad;
+      cx = (x0 + x1) / 2; cy = (y0 + y1) / 2;
+      w = Math.max(x1 - x0, (y1 - y0) / asp, box.width / FIT_ZOOM_MAX);
+    }
+    w = this._clampW(w, box);
+    this._setView({x: cx - w / 2, y: cy - w * asp / 2, w}, box);
+  }
+  fitView() {
+    const box = this._box();
+    if (!box) return;
+    this._fit(box);
+    this.draw();
+  }
+  // After the graph was replaced (preset, undo): refit on small screens if
+  // something would otherwise be out of sight. Does not draw.
+  _autoFit(always) {
+    const box = this._box();
+    if (!box || this._roomy(box)) return;
+    const v = this._curView(box);
+    if (always || this.vertices.some(u => u.x < v.x + R || u.x > v.x + v.w - R
+                                       || u.y < v.y + R || u.y > v.y + v.h - R)) this._fit(box);
+  }
+  // The element changed size (rotation, first layout, a compare tab shown).
+  _onResize() {
+    const box = this._box();
+    if (!box) return;
+    const key = `${Math.round(box.width)}x${Math.round(box.height)}`;
+    if (key === this._boxKey) return;
+    this._boxKey = key;
+    // A view chosen by hand survives (same corner, same width; the height
+    // follows the element) — a scrollbar appearing must not undo a zoom.
+    if (this._userView && this.view) this._setView(this.view, box);
+    else this._fit(box);
+    this.draw();
+  }
+  // Touch: an invisible disc under each vertex, so a qubit is at least a
+  // fingertip wide whatever the zoom. Canvas units; 0 = not needed.
+  _hitR() {
+    if (CANVAS_EXPORT || !_coarse.matches) return 0;
+    const box = this._box();
+    return box ? Math.min(46, Math.max(R + 4, TOUCH_PX / 2 / this._scale(box))) : 0;
   }
 
   deselect() {
@@ -1867,6 +2119,7 @@ class GraphState {
     this.animEdges   = null;
     this.animFade    = null;
     this._resetMotion(true);     // undo is instant: no build-in, no ghosts, no flashes
+    this._autoFit(false);
     this.hideOps();
     this.draw();
     this.fetchCompute();
@@ -1942,6 +2195,7 @@ class GraphState {
     this._previewTo = null;          // the gate preview went with the innerHTML
     const now = performance.now();
     if (!CANVAS_EXPORT) { this._trackMotion(now); this._syncUI(); }
+    const hitR = this._hitRNow = this._hitR();
 
     const bg = el('rect', {x:0, y:0, width:SVG_W, height:SVG_H, fill:CV.bg, id:`svgBg_${this.side}`});
     svg.appendChild(bg);
@@ -1963,7 +2217,7 @@ class GraphState {
     if (this.vertices.length === 0) {
       const t = el('text', {x: SVG_W/2, y: SVG_H/2 - 10,
         'text-anchor':'middle', fill:CV.empty1, 'font-size':15, 'font-weight':600});
-      t.textContent = 'Click anywhere to place the first qubit';
+      t.textContent = `${_coarse.matches ? 'Tap' : 'Click'} anywhere to place the first qubit`;
       svg.appendChild(t);
       const t2 = el('text', {x: SVG_W/2, y: SVG_H/2 + 14,
         'text-anchor':'middle', fill:CV.empty2, 'font-size':12});
@@ -1972,7 +2226,7 @@ class GraphState {
       return;
     }
 
-    if (zxMode && !graphOnly) { this._drawZX(svg, now); this._updateEVDisplay(); return; }
+    if (zxMode && !graphOnly) { this._drawZX(svg, now, hitR); this._updateEVDisplay(); return; }
 
     for (const k of this.edges) {
       const [aid, bid] = k.split(',').map(Number);
@@ -2006,6 +2260,7 @@ class GraphState {
       const [eulFill, eulStroke] = basisColors(eulBasis);
       const g = el('g', {cursor:'pointer', 'data-vid': v.id});
       this._vertexMotion(g, v, now);
+      if (hitR) g.appendChild(el('circle', {cx:v.x, cy:v.y, r:hitR, fill:'transparent'}));
       if (isSel) g.append(...this._selMarks(v, now, {'stroke-width':1.6, 'stroke-dasharray':'4 3'}));
       const plain = graphOnly || labelMode || cliffordMode;
       if (plain) {
@@ -2137,7 +2392,7 @@ class GraphState {
   // Vertex v → Z-spider with fused phase a·π/2; edge (u,v) → Hadamard edge;
   // the output wire of v carries X(b·π/2) then Z(c·π/2), so that the full
   // frame L_v = Z(c·π/2)·X(b·π/2)·Z(a·π/2) sits on qubit v.
-  _drawZX(svg, now) {
+  _drawZX(svg, now, hitR) {
     for (const k of this.edges) {
       const [aid, bid] = k.split(',').map(Number);
       const a = this.vertices.find(v => v.id === aid);
@@ -2192,6 +2447,7 @@ class GraphState {
 
       const g = el('g', {cursor:'pointer', 'data-vid': v.id});
       this._vertexMotion(g, v, now);
+      if (hitR) g.appendChild(el('circle', {cx:v.x, cy:v.y, r:hitR, fill:'transparent'}));
       if (isSel) g.append(...this._selMarks(v, now, {'stroke-width':2, 'stroke-dasharray':'5 3'}));
 
       g.appendChild(el('line', {x1:v.x, y1:v.y, x2:ex, y2:ey,
@@ -2952,6 +3208,7 @@ class GraphState {
     this.animEdges  = null;
     this.animFade   = null;
     this._resetMotion();
+    this._autoFit(true);
     this.hideOps();
     this.draw();
     this.fetchCompute();
@@ -3421,23 +3678,75 @@ class GraphState {
     // Pointer events (mouse + touch + pen) with pointer capture on the <svg>
     // root.  Capture matters on touch: draw() wipes svg.innerHTML, so the node
     // the gesture started on is detached and would stop receiving touchmove.
+    //
+    // One pointer: on a qubit it drags / taps it; on empty space it pans a
+    // zoomed view, or taps (add a qubit / let go of the selection).
+    // Two pointers: pinch — zoom about the midpoint and pan with it. Whatever
+    // the first finger had begun is called off, and nothing counts as a tap
+    // until every finger is up.
+    const ptrs = new Map();          // pointerId → {x, y} on screen
+    let pinch = null;                // {d0, w0, ax, ay}: start distance / view width / canvas point held
+    const TAP_SLOP = e => e.pointerType === 'mouse' ? 5 : 9;       // px of jitter that is still a tap
+
     svgEl.addEventListener('pointerdown', e => {
-      if (this.dragging) return;                     // ignore extra fingers
       if (e.button !== undefined && e.button > 0) return;
-      const pt = svgCoordFromEvent(e, svgEl);
-      const vg = e.target.closest('[data-vid]');
-      const vid = vg ? parseInt(vg.dataset.vid) : null;
-      const v = vid === null ? null : this.vertices.find(v => v.id === vid);
-      activeGraph = this;
-      this.dragging = {pointerId: e.pointerId, id: v ? vid : null,
-                       startPt: pt, origX: v ? v.x : 0, origY: v ? v.y : 0,
-                       moved: false};
+      // A first pointer: nothing older can still be down, whatever was lost on the way.
+      if (e.isPrimary) { ptrs.clear(); pinch = null; this.dragging = null; }
+      ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
       try { svgEl.setPointerCapture(e.pointerId); } catch (_) {}
       e.preventDefault();
+      if (activeGraph !== this) { activeGraph = this; syncDock(); }
+
+      if (ptrs.size === 2) {
+        const d = this.dragging, box = this._box();
+        this.dragging = null;
+        svgEl.classList.remove('is-dragging');
+        if (d && d.id !== null && d.moved) {             // put a half-dragged qubit back
+          const v = this.vertices.find(v => v.id === d.id);
+          if (v) { v.x = d.origX; v.y = d.origY; this.draw(); }
+        }
+        if (!box) return;
+        const [p, q] = [...ptrs.values()], v = this._curView(box);
+        pinch = {d0: Math.hypot(p.x - q.x, p.y - q.y) || 1, w0: v.w,
+                 ax: v.x + ((p.x + q.x) / 2 - box.left) / box.width  * v.w,
+                 ay: v.y + ((p.y + q.y) / 2 - box.top)  / box.height * v.h};
+        return;
+      }
+      if (ptrs.size > 2 || pinch || this.dragging) return;
+
+      const vg = e.target.closest('[data-vid]');
+      let v = vg ? this.vertices.find(v => v.id === parseInt(vg.dataset.vid)) : null;
+      if (v && this._hitRNow) {
+        // Touch discs of neighbouring qubits overlap, and the one drawn last
+        // is the one hit: take the qubit nearest the finger instead.
+        const pt = svgCoordFromEvent(e, svgEl);
+        let best = Infinity;
+        for (const u of this.vertices) {
+          const dist = Math.hypot(u.x - pt.x, u.y - pt.y);
+          if (dist <= this._hitRNow && dist < best) { best = dist; v = u; }
+        }
+      }
+      const vid = v ? v.id : null;
+      this.dragging = {pointerId: e.pointerId, id: v ? vid : null,
+                       cx: e.clientX, cy: e.clientY, origX: v ? v.x : 0, origY: v ? v.y : 0,
+                       view0: this.view ? {...this.view} : null, moved: false};
     });
 
     svgEl.addEventListener('pointermove', e => {
-      if (!this.dragging) {
+      if (ptrs.has(e.pointerId)) ptrs.set(e.pointerId, {x: e.clientX, y: e.clientY});
+      if (pinch) {
+        const box = this._box();
+        if (ptrs.size < 2 || !box) return;
+        const [p, q] = [...ptrs.values()];
+        const w = this._clampW(pinch.w0 * pinch.d0 / (Math.hypot(p.x - q.x, p.y - q.y) || 1), box);
+        const fx = ((p.x + q.x) / 2 - box.left) / box.width, fy = ((p.y + q.y) / 2 - box.top) / box.height;
+        this._setView({x: pinch.ax - fx * w, y: pinch.ay - fy * w * box.height / box.width, w}, box);
+        this._userView = this.view !== null;
+        e.preventDefault();
+        return;
+      }
+      const d = this.dragging;
+      if (!d) {
         // Hovering a second qubit while one is selected: preview the gate.
         if (e.pointerType !== 'mouse' || this.selectedId === null) return;
         const vg = e.target.closest('[data-vid]');
@@ -3445,42 +3754,68 @@ class GraphState {
         this._setPreview(vid !== null && vid !== this.selectedId ? vid : null);
         return;
       }
-      if (e.pointerId !== this.dragging.pointerId) return;
-      const pt = svgCoordFromEvent(e, svgEl);
-      const dx = pt.x - this.dragging.startPt.x;
-      const dy = pt.y - this.dragging.startPt.y;
-      if (!this.dragging.moved && Math.hypot(dx, dy) > 6) {
-        this.dragging.moved = true;
-        if (this.dragging.id !== null) svgEl.classList.add('is-dragging');
+      if (e.pointerId !== d.pointerId) return;
+      if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) > TAP_SLOP(e)) {
+        d.moved = true;
+        if (d.id !== null || d.view0) svgEl.classList.add('is-dragging');
       }
-      if (this.dragging.moved && this.dragging.id !== null) {
-        const v = this.vertices.find(v => v.id === this.dragging.id);
+      if (!d.moved) return;
+      if (d.id !== null) {
+        const v = this.vertices.find(v => v.id === d.id);
         if (v) {
+          const pt = svgCoordFromEvent(e, svgEl);
           v.x = Math.max(R+4, Math.min(SVG_W-R-4, pt.x));
           v.y = Math.max(R+4, Math.min(SVG_H-R-4, pt.y));
           this.draw();
         }
-        e.preventDefault();
+      } else if (d.view0) {                            // pan: the canvas follows the finger
+        const box = this._box();
+        if (box) {
+          const k = d.view0.w / box.width;
+          this._setView({x: d.view0.x - (e.clientX - d.cx) * k,
+                         y: d.view0.y - (e.clientY - d.cy) * k, w: d.view0.w}, box);
+          this._userView = this.view !== null;
+        }
       }
+      e.preventDefault();
     });
 
     const endPointer = e => {
+      ptrs.delete(e.pointerId);
+      try { svgEl.releasePointerCapture(e.pointerId); } catch (_) {}
+      if (pinch) {                                     // over once every finger is up
+        if (ptrs.size === 0) { pinch = null; this.draw(); }   // redraw: touch discs follow the zoom
+        return;
+      }
       if (!this.dragging || e.pointerId !== this.dragging.pointerId) return;
       const d = this.dragging;
       this.dragging = null;
       svgEl.classList.remove('is-dragging');
-      try { svgEl.releasePointerCapture(e.pointerId); } catch (_) {}
       if (e.type === 'pointercancel' || d.moved) return;
       if (d.id !== null) { this.selectVertex(d.id); return; }
       // Empty space: with a qubit selected the click lets go of it; otherwise
-      // it places a new qubit.
+      // it places a new qubit (not in the margin a zoomed-out view shows
+      // around the canvas — it would land somewhere else, clamped).
       if (this.selectedId !== null) { this.deselect(); return; }
       const pt = svgCoordFromEvent(e, svgEl);
+      if (pt.x < 0 || pt.x > SVG_W || pt.y < 0 || pt.y > SVG_H) return;
       if (!this.vertexAt(pt.x, pt.y, -1)) this.addVertex(pt.x, pt.y);
     };
     svgEl.addEventListener('pointerup', endPointer);
     svgEl.addEventListener('pointercancel', endPointer);
     svgEl.addEventListener('pointerleave', () => this._setPreview(null));
+
+    // Ctrl / Cmd + wheel — which is also what a trackpad pinch sends — zooms
+    // about the cursor. A plain wheel is left alone: it scrolls the page.
+    svgEl.addEventListener('wheel', e => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      this.zoomAt(Math.exp(-Math.max(-30, Math.min(30, e.deltaY)) * 0.012), e.clientX, e.clientY);
+    }, {passive: false});
+
+    // Fit the view whenever the canvas gets (or changes) its size.
+    if (window.ResizeObserver) new ResizeObserver(() => this._onResize()).observe(svgEl);
+    else window.addEventListener('resize', () => this._onResize());
 
     // Suppress the synthetic click that follows a pointer gesture; all
     // selection / creation is handled in endPointer above.
@@ -3547,6 +3882,8 @@ function toggleCompare() {
     g._syncUI(true);
     if (g.selectedId !== null) g.showOps(g.selectedId); else g.hideOps();
   }
+  if (!comparisonMode) activeGraph = graphA;
+  syncDock();
 
   if (comparisonMode) {
     // Ensure B events are bound now that the element is visible
@@ -3870,9 +4207,18 @@ async function fusionRunAll() {
 
 function fusionReset() {
   if (!fusion || graphA.busy) { fusionEdited(); return; }
-  const snap = fusion.snapshot;
+  const snap = fusion.snapshot, pairs = fusion.pairs;
   fusion = null;
   graphA._loadRaw(snap.vertices, snap.edges);
+  // The fused qubits were measured out, so their pickers had moved on to
+  // whatever was left: point them back at the pairs this run was armed with.
+  const box = _fusEl('fusPairs');
+  _fusPairFill(box, graphA);
+  [...box.querySelectorAll('.fus-pair')].forEach((row, k) => {
+    if (!pairs[k]) return;
+    row.querySelector('[data-q="a"]').value = String(pairs[k].idA);
+    row.querySelector('[data-q="b"]').value = String(pairs[k].idB);
+  });
   fusionRefresh();
   toast('Fusion reset — state restored');
 }
@@ -4846,6 +5192,7 @@ function setCmpTab(side) {
   document.getElementById('cmpTabB').classList.toggle('active', side === 'b');
   _syncSegIndicators();
   activeGraph = side === 'b' ? graphB : graphA;
+  syncDock();
   (side === 'b' ? graphB : graphA).draw();    // label headers need a laid-out SVG
 }
 
@@ -4929,13 +5276,59 @@ for (const id of _collapsedSet()) {
   if (b) { c.classList.add('collapsed'); b.setAttribute('aria-expanded', 'false'); b.title = 'Expand'; }
 }
 
+// ─── operations dock ──────────────────────────────────────────────────────────
+// The bar at the bottom of single-column layouts (CSS decides whether it is
+// shown at all). It follows the graph the user is working on: A, or in compare
+// mode whichever was touched last.
+function _dockGraph() { return comparisonMode ? activeGraph : graphA; }
+function dockOp(name, arg) { _dockGraph()[name](arg); }
+function dockMore() {
+  const card = document.getElementById(_dockGraph()._opsCardId());
+  if (!card) return;
+  if (card.classList.contains('collapsed')) card.querySelector('.collapse-btn')?.click();
+  card.scrollIntoView({behavior: _reducedMotion.matches ? 'auto' : 'smooth', block: 'start'});
+}
+function _syncDockHeight() {
+  const h = document.getElementById('opsDock')?.offsetHeight;
+  if (h) document.documentElement.style.setProperty('--dock-h', `${h}px`);
+}
+if (window.ResizeObserver && document.getElementById('opsDock'))
+  new ResizeObserver(_syncDockHeight).observe(document.getElementById('opsDock'));
+function syncDock() {
+  const dock = document.getElementById('opsDock');
+  if (!dock) return;
+  const g = _dockGraph();
+  const v = g.selectedId === null ? null : g.vertices.find(u => u.id === g.selectedId);
+  const opening = !!v && !document.body.classList.contains('has-sel');
+  document.body.classList.toggle('has-sel', !!v);
+  if (!v) return;
+  const side = document.getElementById('dockSide');
+  side.textContent = comparisonMode ? g.side.toUpperCase() : '';
+  side.classList.toggle('b', g.side === 'b');
+  document.getElementById('dockPill').textContent = v.label;
+  const nb = g.vertices.filter(u => u.id !== v.id && g.hasEdge(v.id, u.id)).map(u => u.label);
+  document.getElementById('dockDesc').textContent = nb.length ? `N = {${nb.join(', ')}}` : 'no neighbours';
+  _syncDockHeight();
+  // The dock has just come up over the bottom of the canvas (a short screen,
+  // or the page scrolled to the top): scroll the canvas clear of it, as far as
+  // that is possible without pushing its top off the screen.
+  if (opening && getComputedStyle(dock).display !== 'none') {
+    const r = g._box();
+    const over = r ? r.bottom + 8 - (window.innerHeight - dock.offsetHeight) : 0;
+    const by = r ? Math.min(over, r.top - 8) : 0;
+    if (by > 0) window.scrollBy({top: by, behavior: _reducedMotion.matches ? 'auto' : 'smooth'});
+  }
+}
+
 // ─── keyboard & availability ──────────────────────────────────────────────────
 // Esc lets go of the selection, Del / Backspace deletes the selected qubit,
 // Ctrl/Cmd+Z undoes — on the graph last touched (always A outside compare
 // mode). Typing in a field or an open dialog keeps its keys.
 document.addEventListener('pointerdown', e => {
+  const was = activeGraph;
   if (e.target.closest('#graphCardB, #opsCard_b_cmp')) activeGraph = graphB;
   else if (e.target.closest('#graphCardA, #opsCard_a, #opsCard_a_cmp')) activeGraph = graphA;
+  if (activeGraph !== was) syncDock();
 }, true);
 document.addEventListener('keydown', e => {
   if (e.defaultPrevented || e.altKey) return;

@@ -126,6 +126,14 @@ With a qubit selected, a click on empty space — or `Esc` — lets go of it and
 you touched last. Animations are short and cosmetic, and are switched off under
 `prefers-reduced-motion`.
 
+The canvas zooms and pans: pinch (or `Ctrl` + wheel, or the − / fit / +
+buttons in its corner) and drag on empty space. On a phone the graph is fitted
+to a taller canvas instead of shrinking the whole 680×430 drawing area, qubits
+keep a finger-sized touch target at any zoom, and while a qubit is selected its
+operations sit in a bar at the bottom of the screen, so there is no scrolling
+between the canvas and the Operations panel. Zoom is a view only — positions
+and PNG export do not depend on it.
+
 ## HTTP API
 
 Everything the frontend does goes through JSON POSTs; the server is stateless,
